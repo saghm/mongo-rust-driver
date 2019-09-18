@@ -47,7 +47,7 @@
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
-extern crate bson;
+pub extern crate bson;
 #[macro_use]
 extern crate derivative;
 #[macro_use]
