@@ -1,6 +1,6 @@
 //! Contains the types for read concerns and write concerns.
 
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 use bson::{Bson, Document};
 
@@ -107,6 +107,16 @@ impl Acknowledgment {
             Acknowledgment::Nodes(i) => Bson::I32(*i),
             Acknowledgment::Majority => Bson::String("majority".to_string()),
             Acknowledgment::Tag(s) => Bson::String(s.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for Acknowledgment {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Acknowledgment::Nodes(i) => write!(fmt, "{}", i),
+            Acknowledgment::Majority => write!(fmt, "majority"),
+            Acknowledgment::Tag(s) => write!(fmt, "{}", s),
         }
     }
 }

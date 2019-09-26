@@ -56,6 +56,26 @@ impl ReadPreference {
         }
     }
 
+    pub(crate) fn mode(&self) -> &str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary { .. } => "secondary",
+            Self::PrimaryPreferred { .. } => "secondaryPreferred",
+            Self::SecondaryPreferred { .. } => "secondaryPreferred",
+            Self::Nearest { .. } => "nearest",
+        }
+    }
+
+    pub(crate) fn tags(&self) -> Option<impl Iterator<Item = &TagSet>> {
+        match self {
+            Self::Primary => None,
+            Self::Secondary { tag_sets, .. }
+            | Self::PrimaryPreferred { tag_sets, .. }
+            | Self::SecondaryPreferred { tag_sets, .. }
+            | Self::Nearest { tag_sets, .. } => tag_sets.as_ref().map(|t| t.iter()),
+        }
+    }
+
     pub(crate) fn with_tags(self, tag_sets: Vec<TagSet>) -> Result<Self> {
         let tag_sets = Some(tag_sets);
 

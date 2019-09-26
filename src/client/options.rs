@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt,
     fs::File,
     io::{BufReader, Seek, SeekFrom},
@@ -9,6 +9,7 @@ use std::{
 };
 
 use bson::Document;
+use percent_encoding::NON_ALPHANUMERIC;
 use rustls::{
     internal::pemfile, Certificate, RootCertStore, ServerCertVerified, ServerCertVerifier, TLSError,
 };
@@ -37,11 +38,15 @@ lazy_static! {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Host {
-    hostname: String,
-    port: Option<u16>,
+    pub hostname: String,
+    pub port: Option<u16>,
 }
 
 impl Host {
+    pub fn new(hostname: String, port: Option<u16>) -> Self {
+        Self { hostname, port }
+    }
+
     pub fn parse(address: &str) -> Result<Self> {
         let mut parts = address.split(':');
 
@@ -136,6 +141,126 @@ pub struct ClientOptions {
     /// The credential to use for authenticating connections made by this client.
     #[builder(default)]
     pub credential: Option<Credential>,
+}
+
+fn fmt_hashmap_value(fmt: &mut fmt::Formatter, value: &HashMap<String, String>) -> fmt::Result {
+    for (i, (key, val)) in value.iter().enumerate() {
+        if i != 0 {
+            write!(fmt, ",")?;
+        }
+
+        write!(fmt, "{}:{}", key, val)?;
+    }
+
+    Ok(())
+}
+
+impl fmt::Display for ClientOptions {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        macro_rules! write_options {
+            ( $fmt:expr, $( $name:expr, $( $render:path )? { $field:ident } $( => $accessor:expr )? );* ; ) => {
+                {
+                    let mut first = true;
+
+                    #[allow(unused_assignments)]
+                    {
+                        $(
+                            let field = self.$field.as_ref();
+                            $(
+                                let _temp = field.and_then($accessor);
+                                let field = _temp.as_ref();
+                            )?
+
+                            first = match field {
+                                Some(ref val) => {
+                                    let separator = if first { "?" } else { "&" };
+                                    $(
+                                        let val = $render(val);
+                                    )?
+
+                                    write!(
+                                        $fmt,
+                                        "{}{}={}",
+                                        separator,
+                                        $name,
+                                        percent_encoding::utf8_percent_encode(&format!("{}", val), NON_ALPHANUMERIC),
+                                    )?;
+                                    false
+                                }
+                                None => first,
+                            };
+                        )*
+                    }
+
+                    first
+                }
+            };
+        }
+
+        write!(fmt, "mongodb://")?;
+
+        if let Some(ref credential) = self.credential {
+            let has_credential = credential.username.is_some() || credential.password.is_some();
+
+            if let Some(ref username) = credential.username {
+                write!(fmt, "{}", username)?;
+            }
+
+            if has_credential {
+                write!(fmt, ":")?;
+            }
+
+            if let Some(ref password) = credential.password {
+                write!(fmt, "{}", password)?;
+            }
+
+            if has_credential {
+                write!(fmt, "@")?;
+            }
+        }
+
+        for (i, host) in self.hosts.iter().enumerate() {
+            if i != 0 {
+                write!(fmt, ",")?;
+            }
+
+            write!(fmt, "{}", host)?;
+        }
+
+        write!(fmt, "/")?;
+
+        let no_options_written = write_options!(
+            fmt,
+            "authMechanism", AuthMechanism::as_str { credential } => |credential| credential.mechanism.as_ref();
+            // TODO: authMechanismProperties
+            "authSource", { credential } => |credential| credential.source.as_ref();
+            "connectTimeoutMS", Duration::as_millis { connect_timeout };
+            "heartbeatFrequencyMS", Duration::as_millis { heartbeat_freq };
+            "journal", { write_concern } => |concern| concern.journal.as_ref();
+            "localThresholdMS", { local_threshold };
+            "maxPoolSize", { max_pool_size };
+            "readConcernLevel", ReadConcern::as_str { read_concern };
+            "readPreference", ReadPreference::mode { read_preference };
+            "replicaSet", { repl_set_name };
+            "tls", { tls_options } => |_| Some(true);
+            "tlsAllowInvalidCertificates", { tls_options } => |opts| opts.allow_invalid_certificates;
+            "tlsCAFile", { tls_options } => |opts| opts.ca_file_path.as_ref();
+            "tlsCertificateKeyFile", { tls_options } => |opts| opts.cert_key_file_path.as_ref();
+            "serverSelectionTimeoutMS", Duration::as_millis { server_selection_timeout };
+            "w",  { write_concern } => |concern| concern.w.as_ref();
+            "wTimeoutMS", Duration::as_millis { write_concern } => |concern| concern.w_timeout;
+        );
+
+        if let Some(tag_sets) = self.read_preference.as_ref().and_then(ReadPreference::tags) {
+            for tag_set in tag_sets {
+                let separator = if no_options_written { "?" } else { "&" };
+                write!(fmt, "{}readPreferenceTags=", separator)?;
+                fmt_hashmap_value(fmt, tag_set)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
