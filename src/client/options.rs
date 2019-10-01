@@ -283,10 +283,15 @@ struct ClientOptionsParser {
     read_preference_tags: Option<Vec<TagSet>>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, TypedBuilder)]
 pub struct TlsOptions {
+    #[builder(default)]
     pub allow_invalid_certificates: Option<bool>,
+
+    #[builder(default)]
     pub ca_file_path: Option<String>,
+
+    #[builder(default)]
     pub cert_key_file_path: Option<String>,
 }
 
