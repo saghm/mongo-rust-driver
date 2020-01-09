@@ -83,6 +83,8 @@ mod cursor;
 mod db;
 pub mod error;
 pub mod event;
+#[allow(dead_code)]
+pub mod feature;
 mod is_master;
 mod operation;
 pub mod results;

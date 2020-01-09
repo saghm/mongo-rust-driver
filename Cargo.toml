@@ -10,6 +10,11 @@ readme = "README.md"
 name = "mongodb"
 version = "0.9.0"
 
+[features]
+default = ["tokio-runtime"]
+tokio-runtime = ["tokio"]
+async-std-runtime = ["async-std"]
+
 [dependencies]
 base64 = "0.11.0"
 bitflags = "1.1.0"
@@ -38,6 +43,16 @@ typed-builder = "0.3.0"
 version_check = "0.9.1"
 webpki = "0.21.0"
 webpki-roots = "0.18.0"
+async-trait = "0.1.22"
+
+[dependencies.tokio]
+optional = true
+version = "0.2.8"
+features = ["io-util"]
+
+[dependencies.async-std]
+optional = true
+version = "1.4.0"
 
 [dependencies.rustls]
 version = "0.16.0"
