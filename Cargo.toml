@@ -11,11 +11,23 @@ name = "mongodb"
 version = "0.9.0"
 
 [features]
-default = ["tokio-runtime"]
-tokio-runtime = ["tokio"]
-async-std-runtime = ["async-std"]
+default = ["tokio-runtime", "async-std-runtime", "custom-runtime"]
+tokio-runtime = [
+    "tokio/dns",
+    "tokio/io-util",
+    "tokio/rt-core",
+    "tokio/time",
+    "tokio/tcp",
+    "tokio-rustls",
+]
+async-std-runtime = [
+    "async-std",
+    "async-tls",
+]
+custom-runtime = ["tokio/io-util"]
 
 [dependencies]
+async-trait = "0.1.22"
 base64 = "0.11.0"
 bitflags = "1.1.0"
 bson = "0.14.0"
@@ -43,16 +55,14 @@ typed-builder = "0.3.0"
 version_check = "0.9.1"
 webpki = "0.21.0"
 webpki-roots = "0.18.0"
-async-trait = "0.1.22"
-
-[dependencies.tokio]
-optional = true
-version = "0.2.8"
-features = ["io-util"]
 
 [dependencies.async-std]
 optional = true
 version = "1.4.0"
+
+[dependencies.async-tls]
+optional = true
+version = "0.6.0"
 
 [dependencies.rustls]
 version = "0.16.0"
@@ -61,6 +71,14 @@ features = ["dangerous_configuration"]
 [dependencies.serde]
 version = "1.0.98"
 features = ["derive"]
+
+[dependencies.tokio]
+optional = true
+version = "0.2.9"
+
+[dependencies.tokio-rustls]
+optional = true
+version = "0.12.2"
 
 [dev-dependencies]
 approx = "0.3.2"

@@ -160,6 +160,16 @@ pub enum ErrorKind {
     #[error(display = "An error occurred during TXT record lookup: {}", message)]
     TxtLookupError { message: String },
 
+    #[cfg(feature = "tokio-runtime")]
+    /// Wrapper around `tokio::time::Elapsed`.
+    #[error(display = "{}", _0)]
+    TokioTimeoutElapsed(#[error(source)] tokio::time::Elapsed),
+
+    #[cfg(feature = "async-std-runtime")]
+    /// Wrapper around `async_std::future::TimeoutError`.
+    #[error(display = "{}", _0)]
+    AsyncStdTimeoutError(#[error(source)] async_std::future::TimeoutError),
+
     /// The Client timed out while checking out a connection from connection pool.
     #[error(
         display = "Timed out while checking out a connection from connection pool with address {}",

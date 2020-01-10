@@ -25,7 +25,9 @@ use crate::{
     },
     options::{StreamAddress, TlsOptions},
 };
+
 pub(crate) use command::{Command, CommandResponse};
+pub use stream::StreamOptions;
 pub(crate) use stream_description::StreamDescription;
 pub(crate) use wire::next_request_id;
 

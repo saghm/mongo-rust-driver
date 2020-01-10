@@ -15,6 +15,8 @@
 //! #                   .build();
 //! ```
 
+#[cfg(feature = "custom-runtime")]
+pub use crate::cmap::conn::StreamOptions;
 pub use crate::{
     client::{auth, options::*},
     coll::options::*,
