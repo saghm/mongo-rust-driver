@@ -40,6 +40,7 @@ impl Client {
     ) -> Result<(T::O, Connection)> {
         let mut conn = self
             .select_server(op.selection_criteria())?
+            .1
             .checkout_connection()?;
         self.execute_operation_on_connection(op, &mut conn)
             .map(|r| (r, conn))
@@ -57,7 +58,7 @@ impl Client {
         match connection {
             Some(conn) => self.execute_operation_on_connection(op, conn),
             None => {
-                let server = self.select_server(op.selection_criteria())?;
+                let (server_type, server) = self.select_server(op.selection_criteria())?;
                 let mut conn = server.checkout_connection()?;
 
                 let result = self.execute_operation_on_connection(op, &mut conn);
@@ -78,7 +79,7 @@ impl Client {
 
                         // For "node is recovering" or "not master" errors, we must request a
                         // topology check.
-                        server.request_topology_check();
+                        server.monitor_check(server_type);
 
                         let wire_version = conn
                             .stream_description()

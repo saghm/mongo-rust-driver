@@ -3,8 +3,9 @@ mod stream;
 
 use std::future::Future;
 
-use crate::{cmap::conn::StreamOptions, error::Result};
+use derivative::Derivative;
 
+use crate::{cmap::conn::StreamOptions, error::Result};
 use self::stream::AsyncStream;
 
 #[cfg(feature = "custom-runtime")]
@@ -17,12 +18,15 @@ pub use stream::connect::{AsyncReadWrite, Connect};
 pub use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "custom-runtime")]
+#[derive(Clone)]
 pub struct CustomAsyncRuntime {
     pub executor: std::sync::Arc<dyn Execute + Send>,
     pub stream_connector: std::sync::Arc<dyn Connect + Send>,
 }
 
-pub(crate) enum AsyncRuntime {
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
+pub enum AsyncRuntime {
     #[cfg(feature = "tokio-runtime")]
     Tokio,
 
@@ -30,7 +34,10 @@ pub(crate) enum AsyncRuntime {
     AsyncStd,
 
     #[cfg(feature = "custom-runtime")]
-    Custom(CustomAsyncRuntime),
+    Custom(
+        #[derivative(Debug = "ignore")]
+        CustomAsyncRuntime
+    ),
 }
 
 impl AsyncRuntime {

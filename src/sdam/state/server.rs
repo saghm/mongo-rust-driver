@@ -1,13 +1,19 @@
 use std::{
-    sync::{Arc, Condvar, Mutex, RwLock, Weak},
+    ops::DerefMut,
+    sync::{Condvar, Mutex, RwLock, Weak},
     time::Duration,
 };
 
+use bson::{bson, doc};
+use time::PreciseTime;
+
 use super::Topology;
 use crate::{
-    cmap::{options::ConnectionPoolOptions, Connection, ConnectionPool},
+    cmap::{options::ConnectionPoolOptions, Command, Connection, ConnectionPool},
     error::Result,
+    is_master::IsMasterReply,
     options::{ClientOptions, StreamAddress},
+    sdam::{update_topology, ServerDescription, ServerType},
 };
 
 /// Contains the state for a given server in the topology.
@@ -25,6 +31,8 @@ pub(crate) struct Server {
     condvar: Condvar,
 
     condvar_mutex: Mutex<()>,
+
+    monitoring_connection: Mutex<Connection>,
 }
 
 impl Server {
@@ -32,8 +40,17 @@ impl Server {
         topology: Weak<RwLock<Topology>>,
         address: StreamAddress,
         options: &ClientOptions,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let monitoring_connection = Mutex::new(Connection::new(
+            0,
+            address.clone(),
+            0,
+            options.connect_timeout,
+            options.tls_options(),
+            options.cmap_event_handler.clone(),
+        )?);
+
+        Ok(Self {
             topology,
             pool: ConnectionPool::new(
                 address.clone(),
@@ -42,7 +59,8 @@ impl Server {
             condvar: Default::default(),
             condvar_mutex: Default::default(),
             address,
-        }
+            monitoring_connection,
+        })
     }
 
     /// Creates a new Server given the `address` and `options`.
@@ -56,11 +74,6 @@ impl Server {
         self.pool.clear();
     }
 
-    /// Attempts to upgrade the weak reference to the topology to a strong reference and return it.
-    pub(crate) fn topology(&self) -> Option<Arc<RwLock<Topology>>> {
-        self.topology.upgrade()
-    }
-
     /// Waits until either the server is requested to do a topology check or until `duration` has
     /// elapsed. Returns `true` if `duration` has elapsed and `false` otherwise.
     pub(crate) fn wait_timeout(&self, duration: Duration) -> bool {
@@ -71,7 +84,58 @@ impl Server {
             .timed_out()
     }
 
-    pub(crate) fn request_topology_check(&self) {
-        self.condvar.notify_all()
+    pub(crate) fn monitor_check(&self, mut server_type: ServerType) -> Option<ServerType> {
+        // If the topology has been dropped, terminate the monitoring thread.
+        let topology = match self.topology.upgrade() {
+            Some(topology) => topology,
+            None => return None,
+        };
+
+        // Send an isMaster to the server.
+        let server_description = self.check_server(server_type);
+        server_type = server_description.server_type;
+
+        update_topology(topology, server_description);
+
+        Some(server_type)
     }
+
+    fn check_server(&self, server_type: ServerType) -> ServerDescription {
+        let conn = self.monitoring_connection.lock().unwrap();
+        let address = conn.address().clone();
+
+        match is_master(conn) {
+            Ok(reply) => return ServerDescription::new(address, Some(Ok(reply))),
+            Err(e) => {
+                self.clear_connection_pool();
+
+                if server_type == ServerType::Unknown {
+                    return ServerDescription::new(address, Some(Err(e)));
+                }
+            }
+        }
+
+        ServerDescription::new(address, Some(is_master(conn)))
+    }
+}
+
+fn is_master(conn: impl DerefMut<Target = Connection>) -> Result<IsMasterReply> {
+    let command = Command::new_read(
+        "isMaster".into(),
+        "admin".into(),
+        None,
+        doc! { "isMaster": 1 },
+    );
+
+    let start_time = PreciseTime::now();
+    let command_response = conn.send_command(command, None)?;
+    let end_time = PreciseTime::now();
+
+    let command_response = command_response.body()?;
+
+    Ok(IsMasterReply {
+        command_response,
+        // TODO RUST-193: Round-trip time
+        round_trip_time: Some(start_time.to(end_time).to_std().unwrap()),
+    })
 }

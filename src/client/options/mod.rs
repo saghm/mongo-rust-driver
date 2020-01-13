@@ -32,6 +32,7 @@ use crate::{
     concern::{Acknowledgment, ReadConcern, WriteConcern},
     error::{ErrorKind, Result},
     event::{cmap::CmapEventHandler, command::CommandEventHandler},
+    feature::AsyncRuntime,
     sdam::MIN_HEARTBEAT_FREQUENCY,
     selection_criteria::{ReadPreference, SelectionCriteria, TagSet},
     srv::SrvResolver,
@@ -313,6 +314,10 @@ pub struct ClientOptions {
     #[builder(default)]
     pub(crate) zlib_compression: Option<i32>,
 
+    #[derivative(PartialEq = "ignore")]
+    #[builder(default)]
+    pub async_runtime: Option<AsyncRuntime>,
+
     #[builder(default)]
     original_uri: Option<String>,
 }
@@ -501,6 +506,7 @@ impl From<ClientOptionsParser> for ClientOptions {
             credential: parser.credential,
             cmap_event_handler: None,
             command_event_handler: None,
+            async_runtime: None,
             original_uri: Some(parser.original_uri),
         }
     }

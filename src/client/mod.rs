@@ -19,7 +19,7 @@ use crate::{
     event::command::CommandEventHandler,
     operation::ListDatabases,
     options::{ClientOptions, DatabaseOptions},
-    sdam::{Server, Topology, TopologyUpdateCondvar},
+    sdam::{Server, ServerType, Topology, TopologyUpdateCondvar},
     selection_criteria::{ReadPreference, SelectionCriteria},
 };
 
@@ -167,7 +167,10 @@ impl Client {
 
     /// Select a server using the provided criteria. If none is provided, a primary read preference
     /// will be used instead.
-    fn select_server(&self, criteria: Option<&SelectionCriteria>) -> Result<Arc<Server>> {
+    fn select_server(
+        &self,
+        criteria: Option<&SelectionCriteria>,
+    ) -> Result<(ServerType, Arc<Server>)> {
         let criteria =
             criteria.unwrap_or_else(|| &SelectionCriteria::ReadPreference(ReadPreference::Primary));
         let start_time = PreciseTime::now();
@@ -195,10 +198,15 @@ impl Client {
             let server = topology
                 .description
                 .select_server(&criteria)?
-                .and_then(|server| topology.servers.get(&server.address));
+                .and_then(|server_desc| {
+                    topology
+                        .servers
+                        .get(&server_desc.address)
+                        .map(|server| (server_desc.server_type, server.clone()))
+                });
 
             if let Some(server) = server {
-                return Ok(server.clone());
+                return Ok(server);
             }
 
             // Because the servers in the copied Topology are Arc aliases of the servers in the
