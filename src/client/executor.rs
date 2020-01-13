@@ -1,10 +1,10 @@
 use super::Client;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, convert::TryInto};
 
 use bson::Document;
 use lazy_static::lazy_static;
-use time::PreciseTime;
+use time::Instant;
 
 use crate::{
     cmap::Connection,
@@ -34,34 +34,35 @@ impl Client {
     /// Executes an operation and returns the connection used to do so along with the result of the
     /// operation. This will be used primarily for the opening of exhaust cursors.
     #[allow(dead_code)]
-    pub(crate) fn execute_exhaust_operation<T: Operation>(
+    pub(crate) async fn execute_exhaust_operation<T: Operation>(
         &self,
         op: &T,
     ) -> Result<(T::O, Connection)> {
         let mut conn = self
-            .select_server(op.selection_criteria())?
+            .select_server(op.selection_criteria()).await?
             .1
             .checkout_connection()?;
         self.execute_operation_on_connection(op, &mut conn)
+            .await
             .map(|r| (r, conn))
     }
 
     /// Execute the given operation, optionally specifying a connection used to do so.
     /// If no connection is provided, server selection will performed using the criteria specified
     /// on the operation, if any.
-    pub(crate) fn execute_operation<T: Operation>(
+    pub(crate) async fn execute_operation<T: Operation>(
         &self,
         op: &T,
         connection: Option<&mut Connection>,
     ) -> Result<T::O> {
         // if no connection provided, select one.
         match connection {
-            Some(conn) => self.execute_operation_on_connection(op, conn),
+            Some(conn) => self.execute_operation_on_connection(op, conn).await,
             None => {
-                let (server_type, server) = self.select_server(op.selection_criteria())?;
+                let (server_type, server) = self.select_server(op.selection_criteria()).await?;
                 let mut conn = server.checkout_connection()?;
 
-                let result = self.execute_operation_on_connection(op, &mut conn);
+                let result = self.execute_operation_on_connection(op, &mut conn).await;
 
                 // If we encounter certain errors, we must update the topology as per the
                 // SDAM spec.
@@ -101,7 +102,7 @@ impl Client {
     }
 
     /// Executes an operation on a given connection.
-    fn execute_operation_on_connection<T: Operation>(
+    async fn execute_operation_on_connection<T: Operation>(
         &self,
         op: &T,
         connection: &mut Connection,
@@ -109,7 +110,7 @@ impl Client {
         let mut cmd = op.build(connection.stream_description()?)?;
         self.topology()
             .read()
-            .unwrap()
+            .await
             .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria());
 
         let connection_info = connection.info();
@@ -134,7 +135,7 @@ impl Client {
             handler.handle_command_started_event(command_started_event);
         });
 
-        let start_time = PreciseTime::now();
+        let start_time = Instant::now();
 
         let response_result =
             connection
@@ -146,8 +147,8 @@ impl Client {
                     Ok(response)
                 });
 
-        let end_time = PreciseTime::now();
-        let duration = start_time.to(end_time).to_std()?;
+        let end_time = Instant::now();
+        let duration = (end_time - start_time).try_into()?;
 
         match response_result {
             Err(error) => {

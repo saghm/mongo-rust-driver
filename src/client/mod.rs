@@ -2,21 +2,19 @@ pub mod auth;
 mod executor;
 pub mod options;
 
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-
-use time::PreciseTime;
+use std::{convert::TryInto, sync::Arc, time::Duration};
 
 use bson::{Bson, Document};
 use derivative::Derivative;
+use tokio::sync::RwLock;
+use time::Instant;
 
 use crate::{
     concern::{ReadConcern, WriteConcern},
     db::Database,
     error::{ErrorKind, Result},
     event::command::CommandEventHandler,
+    feature::AsyncRuntime,
     operation::ListDatabases,
     options::{ClientOptions, DatabaseOptions},
     sdam::{Server, ServerType, Topology, TopologyUpdateCondvar},
@@ -64,6 +62,8 @@ pub struct Client {
 struct ClientInner {
     topology: Arc<RwLock<Topology>>,
     options: ClientOptions,
+    runtime: AsyncRuntime,
+
     #[derivative(Debug = "ignore")]
     condvar: TopologyUpdateCondvar,
 }
@@ -74,18 +74,43 @@ impl Client {
     ///
     /// See the documentation on
     /// [`ClientOptions::parse`](options/struct.ClientOptions.html#method.parse) for more details.
-    pub fn with_uri_str(uri: &str) -> Result<Self> {
+    pub async fn with_uri_str(uri: &str) -> Result<Self> {
         let options = ClientOptions::parse(uri)?;
 
-        Client::with_options(options)
+        Client::with_options(options).await
     }
 
     /// Creates a new `Client` connected to the cluster specified by `options`.
-    pub fn with_options(options: ClientOptions) -> Result<Self> {
+    pub async fn with_options(mut options: ClientOptions) -> Result<Self> {
         let condvar = TopologyUpdateCondvar::new();
 
+        let runtime = match options.async_runtime.take() {
+            Some(runtime) => runtime,
+
+            // If no runtime is given, use tokio if enabled.
+            #[cfg(feature = "tokio-runtime")]
+            None => AsyncRuntime::Tokio,
+
+            // If no runtime is given and tokio is not enabled, use async-std if enabled.
+            #[cfg(all(not(feature = "tokio-runtime"), feature = "async-std-runtime"))]
+            None => AsyncRuntime::AsyncStd,
+
+            // If no runtime is given and neither tokio or async-std is enabled, return a
+            // ConfigurationError.
+            #[cfg(all(not(feature = "tokio-runtime"), not(feature = "async-std-runtime")))]
+            None => {
+                return Err(ErrorKind::ConfigurationError {
+                    message: "tokio and async-std are not enabled, but no custom runtime was \
+                              provided"
+                        .into(),
+                }
+                .into())
+            }
+        };
+
         let inner = Arc::new(ClientInner {
-            topology: Topology::new(condvar.clone(), options.clone())?,
+            topology: Topology::new(runtime.clone(), condvar.clone(), options.clone()).await?,
+            runtime,
             condvar,
             options,
         });
@@ -167,25 +192,26 @@ impl Client {
 
     /// Select a server using the provided criteria. If none is provided, a primary read preference
     /// will be used instead.
-    fn select_server(
+    async fn select_server(
         &self,
         criteria: Option<&SelectionCriteria>,
     ) -> Result<(ServerType, Arc<Server>)> {
         let criteria =
             criteria.unwrap_or_else(|| &SelectionCriteria::ReadPreference(ReadPreference::Primary));
-        let start_time = PreciseTime::now();
+        let start_time = Instant::now();
         let timeout = self
             .inner
             .options
             .server_selection_timeout
             .unwrap_or(DEFAULT_SERVER_SELECTION_TIMEOUT);
+        let end_time = start_time + timeout;
 
-        while start_time.to(PreciseTime::now()).to_std().unwrap() < timeout {
+        while Instant::now() < end_time {
             // Because we're calling clone on the lock guard, we're actually copying the
             // Topology itself, not just making a new reference to it. The
             // `servers` field will contain references to the same instances
             // though, since each is wrapped in an `Arc`.
-            let topology = self.inner.topology.read().unwrap().clone();
+            let topology = self.inner.topology.read().await.clone();
 
             // Return error if the wire version is invalid.
             if let Some(error_msg) = topology.description.compatibility_error() {
@@ -213,11 +239,16 @@ impl Client {
             // original Topology, requesting a check on the copy will in turn request a check from
             // each of the original servers, so the monitoring threads will be woken the same way
             // they would if `request_topology_check` were called on the original Topology.
-            topology.request_topology_check();
-
-            self.inner
-                .condvar
-                .wait_timeout(timeout - start_time.to(PreciseTime::now()).to_std().unwrap());
+            if topology
+                .topology_check(
+                    (end_time - Instant::now())
+                        .try_into()
+                        .unwrap_or(Duration::new(0, 0)),
+                )
+                .await
+            {
+                break;
+            }
         }
 
         Err(ErrorKind::ServerSelectionError {

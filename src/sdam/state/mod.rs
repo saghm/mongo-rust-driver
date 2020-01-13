@@ -2,17 +2,21 @@ pub(super) mod server;
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{Arc, Condvar},
     time::Duration,
 };
 
 use derivative::Derivative;
+use futures::future::{FutureExt, BoxFuture};
+use futures_timer::Delay;
+use tokio::sync::{Mutex, RwLock};
 
 use self::server::Server;
 use super::TopologyDescription;
 use crate::{
     cmap::Command,
     error::Result,
+    feature::AsyncRuntime,
     options::{ClientOptions, StreamAddress},
     sdam::{
         description::server::{ServerDescription, ServerType},
@@ -35,13 +39,6 @@ impl TopologyUpdateCondvar {
         }
     }
 
-    pub(crate) fn wait_timeout(&self, duration: Duration) {
-        let _ = self
-            .condvar
-            .wait_timeout(self.mutex.lock().unwrap(), duration)
-            .unwrap();
-    }
-
     fn notify(&self) {
         self.condvar.notify_all()
     }
@@ -61,12 +58,15 @@ pub(crate) struct Topology {
     condvar: TopologyUpdateCondvar,
 
     options: ClientOptions,
+
+    runtime: AsyncRuntime,
 }
 
 impl Topology {
     /// Creates a new Topology given the `options`. Arc<RwLock<Topology> is returned rather than
     /// just Topology so that monitoring threads can hold a Weak reference to it.
-    pub(crate) fn new(
+    pub(crate) async fn new(
+        runtime: AsyncRuntime,
         condvar: TopologyUpdateCondvar,
         mut options: ClientOptions,
     ) -> Result<Arc<RwLock<Self>>> {
@@ -78,10 +78,11 @@ impl Topology {
             servers: Default::default(),
             condvar,
             options,
+            runtime,
         }));
 
         {
-            let mut topology_lock = topology.write().unwrap();
+            let mut topology_lock = topology.write().await;
 
             for address in hosts {
                 topology_lock.add_new_server(address, &topology)?;
@@ -111,10 +112,28 @@ impl Topology {
             .update_command_with_read_pref(server_type, command, criteria)
     }
 
-    pub(crate) fn request_topology_check(&self) {
+    pub(crate) async fn topology_check(&self, timeout: Duration) -> bool {
+        let mut futures: Vec<BoxFuture<()>> = vec![Box::pin(Delay::new(timeout))];
+
         for server in self.servers.values() {
-            server.request_topology_check();
+            let server_desc = match self.description.get_server_description(&server.address) {
+                Some(desc) => desc,
+                None => continue,
+            };
+
+            let server = server.clone();
+            let server_type = server_desc.server_type;
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+
+            self.runtime.execute(async move {
+                server.monitor_check(server_type).await;
+                let _ = sender.send(());
+            });
+
+            futures.push(Box::pin(receiver.map(|_| ())));
         }
+
+        futures::future::select_all(futures).await.1 == 0
     }
 
     fn add_new_server(
@@ -135,7 +154,17 @@ impl Topology {
         )?);
         self.servers.insert(address, server.clone());
 
-        monitor_server(Arc::downgrade(&server), options.heartbeat_freq);
+        let monitor_heartbeat_freq = options.heartbeat_freq;
+        let monitor_runtime = self.runtime.clone();
+
+        self.runtime.execute(async move {
+            monitor_server(
+                monitor_runtime,
+                Arc::downgrade(&server),
+                monitor_heartbeat_freq,
+            )
+            .await;
+        });
 
         Ok(())
     }
@@ -167,14 +196,14 @@ impl Topology {
 }
 
 /// Updates the provided topology in a minimally contentious way by cloning first.
-pub(crate) fn update_topology(
+pub(crate) async fn update_topology(
     topology: Arc<RwLock<Topology>>,
     server_description: ServerDescription,
 ) {
     // Because we're calling clone on the lock guard, we're actually copying the Topology itself,
     // not just making a new reference to it. The `servers` field will contain references to the
     // same instances though, since each is wrapped in an `Arc`.
-    let mut topology_clone = topology.read().unwrap().clone();
+    let mut topology_clone = topology.read().await.clone();
 
     // TODO RUST-232: Theoretically, `TopologyDescription::update` can return an error. However,
     // this can only happen if we try to access a field from the isMaster response when an error
@@ -186,7 +215,7 @@ pub(crate) fn update_topology(
 
     // Now that we have the proper state in the copy, acquire a lock on the proper topology and move
     // the info over.
-    let mut topology_lock = topology.write().unwrap();
+    let mut topology_lock = topology.write().await;
     topology_lock.description = topology_clone.description;
     topology_lock.servers = topology_clone.servers;
     topology_lock.notify();

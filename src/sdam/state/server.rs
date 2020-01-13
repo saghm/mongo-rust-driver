@@ -1,11 +1,15 @@
 use std::{
+    convert::TryInto,
     ops::DerefMut,
-    sync::{Condvar, Mutex, RwLock, Weak},
-    time::Duration,
+    sync::{Condvar, Weak},
 };
 
 use bson::{bson, doc};
-use time::PreciseTime;
+use derivative::Derivative;
+use futures_timer::Delay;
+use lazy_static::lazy_static;
+use time::Instant;
+use tokio::sync::{Mutex, RwLock};
 
 use super::Topology;
 use crate::{
@@ -16,8 +20,14 @@ use crate::{
     sdam::{update_topology, ServerDescription, ServerType},
 };
 
+lazy_static! {
+    // Unfortunately, the `time` crate has not yet updated to make the `Duration` constructors `const`, so we have to use lazy_static.
+    pub(crate) static ref MIN_HEARTBEAT_FREQUENCY: time::Duration = time::Duration::milliseconds(500);
+}
+
 /// Contains the state for a given server in the topology.
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct Server {
     pub(crate) address: StreamAddress,
 
@@ -33,6 +43,9 @@ pub(crate) struct Server {
     condvar_mutex: Mutex<()>,
 
     monitoring_connection: Mutex<Connection>,
+
+    #[derivative(Debug = "ignore")]
+    last_check: Mutex<Option<Instant>>,
 }
 
 impl Server {
@@ -60,6 +73,7 @@ impl Server {
             condvar_mutex: Default::default(),
             address,
             monitoring_connection,
+            last_check: Mutex::new(None),
         })
     }
 
@@ -74,25 +88,39 @@ impl Server {
         self.pool.clear();
     }
 
-    /// Waits until either the server is requested to do a topology check or until `duration` has
-    /// elapsed. Returns `true` if `duration` has elapsed and `false` otherwise.
-    pub(crate) fn wait_timeout(&self, duration: Duration) -> bool {
-        self.condvar
-            .wait_timeout(self.condvar_mutex.lock().unwrap(), duration)
-            .unwrap()
-            .1
-            .timed_out()
-    }
-
-    pub(crate) fn monitor_check(&self, mut server_type: ServerType) -> Option<ServerType> {
+    pub(crate) async fn monitor_check(&self, mut server_type: ServerType) -> Option<ServerType> {
         // If the topology has been dropped, terminate the monitoring thread.
         let topology = match self.topology.upgrade() {
             Some(topology) => topology,
             None => return None,
         };
 
+        {
+            let mut last_check_owned = self.last_check.lock().await;
+            let last_check = last_check_owned.deref_mut();
+
+            if let Some(ref mut last_check) = last_check {
+                let duration_since_last_check = Instant::now() - *last_check;
+
+                if duration_since_last_check < *MIN_HEARTBEAT_FREQUENCY {
+                    let remaining_time = *MIN_HEARTBEAT_FREQUENCY - duration_since_last_check;
+
+                    // Since MIN_HEARTBEAT_FREQUENCY is 500 and `duration_since_last_check` is less
+                    // than it but still positive, we can be sure that the time::Duration can be
+                    // successfully converted to a std::time::Duration. However, in the case of some
+                    // bug causing this not to be true, rather than panicking the monitoring thread,
+                    // we instead just don't sleep and proceed to checking the server a bit early.
+                    if let Ok(remaining_time) = remaining_time.try_into() {
+                        Delay::new(remaining_time).await;
+                    }
+                }
+            }
+
+            std::mem::replace(last_check, Some(Instant::now()));
+        }
+
         // Send an isMaster to the server.
-        let server_description = self.check_server(server_type);
+        let server_description = self.check_server(server_type).await;
         server_type = server_description.server_type;
 
         update_topology(topology, server_description);
@@ -100,11 +128,11 @@ impl Server {
         Some(server_type)
     }
 
-    fn check_server(&self, server_type: ServerType) -> ServerDescription {
-        let conn = self.monitoring_connection.lock().unwrap();
+    async fn check_server(&self, server_type: ServerType) -> ServerDescription {
+        let mut conn = self.monitoring_connection.lock().await;
         let address = conn.address().clone();
 
-        match is_master(conn) {
+        match is_master(conn.deref_mut()) {
             Ok(reply) => return ServerDescription::new(address, Some(Ok(reply))),
             Err(e) => {
                 self.clear_connection_pool();
@@ -115,11 +143,11 @@ impl Server {
             }
         }
 
-        ServerDescription::new(address, Some(is_master(conn)))
+        ServerDescription::new(address, Some(is_master(conn.deref_mut())))
     }
 }
 
-fn is_master(conn: impl DerefMut<Target = Connection>) -> Result<IsMasterReply> {
+fn is_master(conn: &mut Connection) -> Result<IsMasterReply> {
     let command = Command::new_read(
         "isMaster".into(),
         "admin".into(),
@@ -127,15 +155,15 @@ fn is_master(conn: impl DerefMut<Target = Connection>) -> Result<IsMasterReply> 
         doc! { "isMaster": 1 },
     );
 
-    let start_time = PreciseTime::now();
+    let start_time = Instant::now();
     let command_response = conn.send_command(command, None)?;
-    let end_time = PreciseTime::now();
+    let end_time = Instant::now();
 
     let command_response = command_response.body()?;
 
     Ok(IsMasterReply {
         command_response,
         // TODO RUST-193: Round-trip time
-        round_trip_time: Some(start_time.to(end_time).to_std().unwrap()),
+        round_trip_time: Some((end_time - start_time).try_into().unwrap()),
     })
 }

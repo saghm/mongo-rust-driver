@@ -5,7 +5,6 @@ use std::{fmt, sync::Arc};
 use err_derive::Error;
 use lazy_static::lazy_static;
 use serde::Deserialize;
-use time::OutOfRangeError;
 
 use crate::options::StreamAddress;
 
@@ -106,6 +105,13 @@ pub enum ErrorKind {
     #[error(display = "Command failed {}", _0)]
     CommandError(CommandError),
 
+    /// The driver was configured incorrectly.
+    #[error(display = "Invalid driver configuration: {}", message)]
+    ConfigurationError { message: String },
+
+    #[error(display = "{}", _0)]
+    TimeConversionRangeError(#[error(source)] time::ConversionRangeError),
+
     /// Wrapper around `webpki::InvalidDNSNameError`.
     #[error(display = "{}", _0)]
     DnsName(#[error(source)] webpki::InvalidDNSNameError),
@@ -130,9 +136,6 @@ pub enum ErrorKind {
         message
     )]
     OperationError { message: String },
-
-    #[error(display = "{}", _0)]
-    OutOfRangeError(#[error(source)] OutOfRangeError),
 
     /// Data from a file could not be parsed.
     #[error(display = "Unable to parse {} data from {}", data_type, file_path)]

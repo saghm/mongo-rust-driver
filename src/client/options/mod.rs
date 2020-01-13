@@ -1099,7 +1099,7 @@ impl ClientOptionsParser {
             k @ "heartbeatfrequencyms" => {
                 let duration = get_duration!(value, k);
 
-                if duration < MIN_HEARTBEAT_FREQUENCY.num_milliseconds() as u64 {
+                if duration < MIN_HEARTBEAT_FREQUENCY.whole_milliseconds() as u64 {
                     return Err(ErrorKind::ArgumentError {
                         message: format!(
                             "'heartbeatFrequencyMS' must be at least 500, but {} was given",

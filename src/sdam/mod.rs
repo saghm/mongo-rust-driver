@@ -7,6 +7,10 @@ pub use self::public::{ServerInfo, ServerType};
 
 pub(crate) use self::{
     description::{server::ServerDescription, topology::TopologyDescription},
-    monitor::MIN_HEARTBEAT_FREQUENCY,
-    state::{server::Server, update_topology, Topology, TopologyUpdateCondvar},
+    state::{
+        server::{Server, MIN_HEARTBEAT_FREQUENCY},
+        update_topology,
+        Topology,
+        TopologyUpdateCondvar,
+    },
 };
