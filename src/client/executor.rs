@@ -39,7 +39,8 @@ impl Client {
         op: &T,
     ) -> Result<(T::O, Connection)> {
         let mut conn = self
-            .select_server(op.selection_criteria()).await?
+            .select_server(op.selection_criteria())
+            .await?
             .1
             .checkout_connection()?;
         self.execute_operation_on_connection(op, &mut conn)
@@ -108,10 +109,11 @@ impl Client {
         connection: &mut Connection,
     ) -> Result<T::O> {
         let mut cmd = op.build(connection.stream_description()?)?;
-        self.topology()
-            .read()
-            .await
-            .update_command_with_read_pref(connection.address(), &mut cmd, op.selection_criteria());
+        self.topology().read().await.update_command_with_read_pref(
+            connection.address(),
+            &mut cmd,
+            op.selection_criteria(),
+        );
 
         let connection_info = connection.info();
         let request_id = crate::cmap::conn::next_request_id();

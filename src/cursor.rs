@@ -1,8 +1,22 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{
+    collections::VecDeque,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use bson::{bson, doc, Document};
+use derivative::Derivative;
+use futures::{future::BoxFuture, stream::Stream};
 
-use crate::{error::Result, operation::GetMore, options::StreamAddress, Client, Namespace};
+use crate::{
+    error::Result,
+    operation::GetMore,
+    options::StreamAddress,
+    results::GetMoreResult,
+    Client,
+    Namespace,
+};
 
 /// A `Cursor` streams the result of a query. When a query is made, a `Cursor` will be returned with
 /// the first batch of results from the server; the documents will be returned as the `Cursor` is
@@ -60,9 +74,17 @@ use crate::{error::Result, operation::GetMore, options::StreamAddress, Client, N
 #[derive(Debug)]
 pub struct Cursor {
     client: Client,
-    buffer: VecDeque<Document>,
     get_more: GetMore,
     exhausted: bool,
+    state: PollState,
+}
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+enum PollState {
+    Finished,
+    Executing(#[derivative(Debug = "ignore")] BoxFuture<'static, Result<GetMoreResult>>),
+    Buffer(VecDeque<Document>),
 }
 
 impl Cursor {
@@ -77,9 +99,9 @@ impl Cursor {
 
         Self {
             client,
-            buffer: spec.buffer,
             get_more,
             exhausted: spec.id == 0,
+            state: PollState::Buffer(spec.buffer),
         }
     }
 }
@@ -102,20 +124,38 @@ impl Drop for Cursor {
     }
 }
 
-impl Iterator for Cursor {
+impl Stream for Cursor {
     type Item = Result<Document>;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.buffer.is_empty() && !self.exhausted {
-            match self.client.execute_operation(&self.get_more, None) {
-                Ok(get_more_result) => {
-                    self.buffer.extend(get_more_result.batch);
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match self.state {
+            PollState::Finished => return Poll::Ready(None),
+            PollState::Executing(future) => match future.poll(cx) {
+                Poll::Ready(Ok(get_more_result)) => {
+                    self.state = PollState::Buffer(get_more_result.batch);
                     self.exhausted = get_more_result.exhausted;
                 }
-                Err(e) => return Some(Err(e)),
-            };
+                Poll::Ready(Err(e)) => {
+                    self.state = PollState::Finished;
+                    return Poll::Ready(Some(Err(e)));
+                }
+                Poll::Pending => return Poll::Pending,
+            },
+            PollState::Buffer(ref mut buffer) => {
+                if buffer.is_empty() && !self.exhausted {
+                    self.state = PollState::Executing(Box::pin(
+                        self.client.execute_operation(&self.get_more, None),
+                    ));
+                    return Poll::Pending;
+                }
+
+                if self.exhausted {
+                    self.state = PollState::Finished;
+                }
+
+                Poll::Ready(buffer.pop_front().map(Ok))
+            }
         }
-        self.buffer.pop_front().map(Ok)
     }
 }
 

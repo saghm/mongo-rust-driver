@@ -7,7 +7,7 @@ use std::{
 };
 
 use derivative::Derivative;
-use futures::future::{FutureExt, BoxFuture};
+use futures::future::{BoxFuture, FutureExt};
 use futures_timer::Delay;
 use tokio::sync::{Mutex, RwLock};
 

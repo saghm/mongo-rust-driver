@@ -3,6 +3,7 @@ pub mod options;
 use std::sync::Arc;
 
 use bson::{Bson, Document};
+use futures::{future, stream::TryStreamExt};
 
 use crate::{
     concern::{ReadConcern, WriteConcern},
@@ -141,17 +142,17 @@ impl Database {
     }
 
     /// Drops the database, deleting all data, collections, users, and indexes stored in it.
-    pub fn drop(&self, options: impl Into<Option<DropDatabaseOptions>>) -> Result<()> {
+    pub async fn drop(&self, options: impl Into<Option<DropDatabaseOptions>>) -> Result<()> {
         let mut options = options.into();
         resolve_options!(self, options, [write_concern]);
 
         let drop_database = DropDatabase::new(self.name().to_string(), options);
-        self.client().execute_operation(&drop_database, None)
+        self.client().execute_operation(&drop_database, None).await
     }
 
     /// Gets information about each of the collections in the database. The cursor will yield a
     /// document pertaining to each collection in the database.
-    pub fn list_collections(
+    pub async fn list_collections(
         &self,
         filter: impl Into<Option<Document>>,
         options: impl Into<Option<ListCollectionsOptions>>,
@@ -164,11 +165,12 @@ impl Database {
         );
         self.client()
             .execute_operation(&list_collections, None)
+            .await
             .map(|spec| Cursor::new(self.client().clone(), spec))
     }
 
     /// Gets the names of the collections in the database.
-    pub fn list_collection_names(
+    pub async fn list_collection_names(
         &self,
         filter: impl Into<Option<Document>>,
     ) -> Result<Vec<String>> {
@@ -177,28 +179,29 @@ impl Database {
         let cursor = self
             .client()
             .execute_operation(&list_collections, None)
+            .await
             .map(|spec| Cursor::new(self.client().clone(), spec))?;
 
         cursor
-            .map(|doc| {
-                let name = doc?
-                    .get("name")
-                    .and_then(Bson::as_str)
-                    .ok_or_else(|| ErrorKind::ResponseError {
+            .and_then(|doc| match doc.get("name").and_then(Bson::as_str) {
+                Some(name) => future::ok(name.into()),
+                None => future::err(
+                    ErrorKind::ResponseError {
                         message: "Expected name field in server response, but there was none."
                             .to_string(),
-                    })?
-                    .to_string();
-                Ok(name)
+                    }
+                    .into(),
+                ),
             })
-            .collect()
+            .try_collect()
+            .await
     }
 
     /// Creates a new collection in the database with the given `name` and `options`.
     ///
     /// Note that MongoDB creates collections implicitly when data is inserted, so this method is
     /// not needed if no special options are required.
-    pub fn create_collection(
+    pub async fn create_collection(
         &self,
         name: &str,
         options: impl Into<Option<CreateCollectionOptions>>,
@@ -213,7 +216,7 @@ impl Database {
             },
             options,
         );
-        self.client().execute_operation(&create, None)
+        self.client().execute_operation(&create, None).await
     }
 
     /// Runs a database-level command.
@@ -221,20 +224,20 @@ impl Database {
     /// Note that no inspection is done on `doc`, so the command will not use the database's default
     /// read concern or write concern. If specific read concern or write concern is desired, it must
     /// be specified manually.
-    pub fn run_command(
+    pub async fn run_command(
         &self,
         command: Document,
         selection_criteria: impl Into<Option<SelectionCriteria>>,
     ) -> Result<Document> {
         let operation = RunCommand::new(self.name().into(), command, selection_criteria.into());
-        self.client().execute_operation(&operation, None)
+        self.client().execute_operation(&operation, None).await
     }
 
     /// Runs an aggregation operation.
     ///
     /// See the documentation [here](https://docs.mongodb.com/manual/aggregation/) for more
     /// information on aggregations.
-    pub fn aggregate(
+    pub async fn aggregate(
         &self,
         pipeline: impl IntoIterator<Item = Document>,
         options: impl Into<Option<AggregateOptions>>,
@@ -250,6 +253,7 @@ impl Database {
         let client = self.client();
         client
             .execute_operation(&aggregate, None)
+            .await
             .map(|spec| Cursor::new(client.clone(), spec))
     }
 }

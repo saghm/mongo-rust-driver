@@ -6,8 +6,8 @@ use std::{convert::TryInto, sync::Arc, time::Duration};
 
 use bson::{Bson, Document};
 use derivative::Derivative;
-use tokio::sync::RwLock;
 use time::Instant;
+use tokio::sync::RwLock;
 
 use crate::{
     concern::{ReadConcern, WriteConcern},
@@ -160,15 +160,21 @@ impl Client {
     }
 
     /// Gets information about each database present in the cluster the Client is connected to.
-    pub fn list_databases(&self, filter: impl Into<Option<Document>>) -> Result<Vec<Document>> {
+    pub async fn list_databases(
+        &self,
+        filter: impl Into<Option<Document>>,
+    ) -> Result<Vec<Document>> {
         let op = ListDatabases::new(filter.into(), false);
-        self.execute_operation(&op, None)
+        self.execute_operation(&op, None).await
     }
 
     /// Gets the names of the databases present in the cluster the Client is connected to.
-    pub fn list_database_names(&self, filter: impl Into<Option<Document>>) -> Result<Vec<String>> {
+    pub async fn list_database_names(
+        &self,
+        filter: impl Into<Option<Document>>,
+    ) -> Result<Vec<String>> {
         let op = ListDatabases::new(filter.into(), true);
-        match self.execute_operation(&op, None) {
+        match self.execute_operation(&op, None).await {
             Ok(databases) => databases
                 .into_iter()
                 .map(|doc| {

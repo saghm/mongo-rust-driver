@@ -1,15 +1,12 @@
 mod executor;
 mod stream;
 
-use std::{future::Future};
+use std::future::Future;
 
 use derivative::Derivative;
 
 use self::stream::AsyncStream;
-use crate::{
-    cmap::conn::StreamOptions,
-    error::{Result},
-};
+use crate::{cmap::conn::StreamOptions, error::Result};
 
 #[cfg(feature = "custom-runtime")]
 pub use executor::Execute;
