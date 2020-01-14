@@ -188,6 +188,6 @@ pub(crate) async fn update_topology(
             server.close();
         }
     }
-    
+
     topology_lock.servers = topology_clone.servers;
 }

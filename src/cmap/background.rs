@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
-use crate::event::cmap::ConnectionClosedReason;
 use super::ConnectionPool;
+use crate::event::cmap::ConnectionClosedReason;
 
 /// Cleans up any stale or idle connections and adds new connections if the total number is below
 /// the min pool size.
@@ -11,7 +11,7 @@ pub(super) async fn perform_checks(pool: &ConnectionPool) -> bool {
     if remove_perished_connections_from_pool(&pool).await {
         return true;
     }
-    
+
     if ensure_min_connections_in_pool(&pool).await {
         return true;
     }
@@ -20,13 +20,13 @@ pub(super) async fn perform_checks(pool: &ConnectionPool) -> bool {
 }
 
 /// Iterate over the connections and remove any that are stale or idle.
-async fn remove_perished_connections_from_pool(pool: &ConnectionPool) -> bool{
+async fn remove_perished_connections_from_pool(pool: &ConnectionPool) -> bool {
     let mut state = pool.state.write().await;
 
     if state.closed {
         return true;
     }
-    
+
     let mut i = 0;
 
     while i < state.connections.len() {
