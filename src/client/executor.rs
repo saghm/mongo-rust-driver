@@ -48,6 +48,10 @@ impl Client {
             .map(|r| (r, conn))
     }
 
+    pub(crate) async fn execute_operation_owned<T: Operation>(self, op: T) -> Result<T::O> {
+        self.execute_operation(&op, None).await
+    }
+
     /// Execute the given operation, optionally specifying a connection used to do so.
     /// If no connection is provided, server selection will performed using the criteria specified
     /// on the operation, if any.
@@ -71,17 +75,17 @@ impl Client {
                     let update = || {
                         let description =
                             ServerDescription::new(conn.address().clone(), Some(Err(e.clone())));
-                        update_topology(self.topology(), description);
+                        update_topology(self.topology(), description)
                     };
 
                     if e.is_non_timeout_network_error() {
-                        update();
+                        update().await;
                     } else if e.is_recovering() || e.is_not_master() {
-                        update();
+                        update().await;
 
                         // For "node is recovering" or "not master" errors, we must request a
                         // topology check.
-                        server.monitor_check(server_type);
+                        server.monitor_check(server_type).await;
 
                         let wire_version = conn
                             .stream_description()

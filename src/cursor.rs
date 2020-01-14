@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -76,13 +77,12 @@ pub struct Cursor {
     client: Client,
     get_more: GetMore,
     exhausted: bool,
-    state: PollState,
+    state: Option<PollState>,
 }
 
 #[derive(Derivative)]
 #[derivative(Debug)]
 enum PollState {
-    Finished,
     Executing(#[derivative(Debug = "ignore")] BoxFuture<'static, Result<GetMoreResult>>),
     Buffer(VecDeque<Document>),
 }
@@ -101,7 +101,7 @@ impl Cursor {
             client,
             get_more,
             exhausted: spec.id == 0,
-            state: PollState::Buffer(spec.buffer),
+            state: Some(PollState::Buffer(spec.buffer)),
         }
     }
 }
@@ -127,34 +127,40 @@ impl Drop for Cursor {
 impl Stream for Cursor {
     type Item = Result<Document>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        match self.state {
-            PollState::Finished => return Poll::Ready(None),
-            PollState::Executing(future) => match future.poll(cx) {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        match self.state.take() {
+            Some(PollState::Executing(mut future)) => match Pin::new(&mut future).poll(cx) {
                 Poll::Ready(Ok(get_more_result)) => {
-                    self.state = PollState::Buffer(get_more_result.batch);
+                    let mut buffer: VecDeque<_> = get_more_result.batch.into_iter().collect();
+                    let next_doc = buffer.pop_front();
+
+                    self.state = Some(PollState::Buffer(buffer));
                     self.exhausted = get_more_result.exhausted;
+                    Poll::Ready(next_doc.map(Ok))
                 }
-                Poll::Ready(Err(e)) => {
-                    self.state = PollState::Finished;
-                    return Poll::Ready(Some(Err(e)));
+                Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+                Poll::Pending => {
+                    self.state = Some(PollState::Executing(future));
+                    Poll::Pending
                 }
-                Poll::Pending => return Poll::Pending,
             },
-            PollState::Buffer(ref mut buffer) => {
+            Some(PollState::Buffer(mut buffer)) => {
                 if buffer.is_empty() && !self.exhausted {
-                    self.state = PollState::Executing(Box::pin(
-                        self.client.execute_operation(&self.get_more, None),
-                    ));
+                    let future = Box::pin(
+                        self.client
+                            .clone()
+                            .execute_operation_owned(self.get_more.clone()),
+                    );
+
+                    self.state = Some(PollState::Executing(future));
                     return Poll::Pending;
                 }
 
-                if self.exhausted {
-                    self.state = PollState::Finished;
-                }
-
-                Poll::Ready(buffer.pop_front().map(Ok))
+                let next_doc = buffer.pop_front();
+                self.state = Some(PollState::Buffer(buffer));
+                Poll::Ready(next_doc.map(Ok))
             }
+            None => Poll::Ready(None),
         }
     }
 }

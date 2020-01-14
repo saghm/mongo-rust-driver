@@ -123,7 +123,7 @@ impl Server {
         let server_description = self.check_server(server_type).await;
         server_type = server_description.server_type;
 
-        update_topology(topology, server_description);
+        update_topology(topology, server_description).await;
 
         Some(server_type)
     }
