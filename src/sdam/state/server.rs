@@ -1,8 +1,4 @@
-use std::{
-    convert::TryInto,
-    ops::DerefMut,
-    sync::Weak,
-};
+use std::{convert::TryInto, ops::DerefMut, sync::Weak};
 
 use bson::{bson, doc};
 use derivative::Derivative;
@@ -56,7 +52,6 @@ impl Server {
             0,
             options.connect_timeout,
             options.tls_options(),
-            options.cmap_event_handler.clone(),
         )?);
 
         Ok(Self {
@@ -71,12 +66,19 @@ impl Server {
         })
     }
 
-    /// Creates a new Server given the `address` and `options`.
-    /// Checks out a connection from the server's pool.
-    pub(crate) fn checkout_connection(&self) -> Result<Connection> {
-        self.pool.check_out()
+    pub(crate) fn close(&self) {
+        self.pool.close()
     }
 
+    /// Creates a new Server given the `address` and `options`.
+    /// Checks out a connection from the server's pool.
+    pub(crate) async fn checkout_connection(&self) -> Result<Connection> {
+        self.pool.check_out().await
+    }
+
+    pub(crate) async fn checkin_connection(&self, connection: Connection) {
+        self.pool.check_in(connection).await
+    }
     /// Clears the connection pool associated with the server.
     pub(crate) fn clear_connection_pool(&self) {
         self.pool.clear();

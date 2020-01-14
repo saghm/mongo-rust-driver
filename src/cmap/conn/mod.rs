@@ -3,19 +3,14 @@ mod stream;
 mod stream_description;
 mod wire;
 
-use std::{
-    sync::{Arc, Weak},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use derivative::Derivative;
 
 use self::{stream::Stream, wire::Message};
-use super::ConnectionPoolInner;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
-        CmapEventHandler,
         ConnectionCheckedInEvent,
         ConnectionCheckedOutEvent,
         ConnectionClosedEvent,
@@ -56,15 +51,7 @@ pub(crate) struct Connection {
     /// to detect if the connection is idle.
     ready_and_available_time: Option<Instant>,
 
-    /// The connection will have a weak reference to its pool when it's checked out. When it's
-    /// A reference to the pool that maintains the connection. If the connection is currently
-    /// currently checked into the pool, this will be None.
-    pub(super) pool: Option<Weak<ConnectionPoolInner>>,
-
     stream: Stream,
-
-    #[derivative(Debug = "ignore")]
-    handler: Option<Arc<dyn CmapEventHandler>>,
 }
 
 impl Connection {
@@ -75,17 +62,14 @@ impl Connection {
         generation: u32,
         connect_timeout: Option<Duration>,
         tls_options: Option<TlsOptions>,
-        handler: Option<Arc<dyn CmapEventHandler>>,
     ) -> Result<Self> {
         let conn = Self {
             id,
             generation,
-            pool: None,
             stream_description: None,
             ready_and_available_time: None,
             stream: Stream::connect(address.clone(), connect_timeout, tls_options)?,
             address,
-            handler,
         };
 
         Ok(conn)
@@ -102,38 +86,16 @@ impl Connection {
         &self.address
     }
 
-    /// In order to check a connection back into the pool when it's dropped, we need to be able to
-    /// replace it with something. The `null` method facilitates this by creating a dummy connection
-    /// which can be passed to `std::mem::replace` to be dropped in place of the original
-    /// connection.
-    fn null() -> Self {
-        Self {
-            id: 0,
-            address: StreamAddress {
-                hostname: Default::default(),
-                port: None,
-            },
-            generation: 0,
-            pool: None,
-            stream_description: Some(Default::default()),
-            ready_and_available_time: None,
-            stream: Stream::Null,
-            handler: None,
-        }
-    }
-
     /// Helper to mark the time that the connection was checked into the pool for the purpose of
     /// detecting when it becomes idle.
     pub(super) fn mark_checked_in(&mut self) {
-        self.pool.take();
         self.ready_and_available_time = Some(Instant::now());
     }
 
     /// Helper to mark that the connection has been checked out of the pool. This ensures that the
     /// connection is not marked as idle based on the time that it's checked out and that it has a
     /// reference to the pool.
-    pub(super) fn mark_checked_out(&mut self, pool: Weak<ConnectionPoolInner>) {
-        self.pool = Some(pool);
+    pub(super) fn mark_checked_out(&mut self) {
         self.ready_and_available_time.take();
     }
 
@@ -219,27 +181,5 @@ impl Connection {
             }
             .into()
         })
-    }
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        // If the connection has a weak reference to a pool, that means that the connection is being
-        // dropped when it's checked out. If the pool is still alive, it should check itself back
-        // in. Otherwise, the connection should close itself and emit a ConnectionClosed event
-        // (because the `close` helper was not called explicitly).
-        //
-        // If the connection does not have a weak reference to a pool, then the connection is being
-        // dropped while it's not checked out. This means that the pool called the close helper
-        // explicitly, so we don't add it back to the pool or emit any events.
-        if let Some(ref weak_pool_ref) = self.pool {
-            if let Some(strong_pool_ref) = weak_pool_ref.upgrade() {
-                strong_pool_ref.check_in(std::mem::replace(self, Self::null()));
-            } else if let Some(ref handler) = self.handler {
-                handler.handle_connection_closed_event(
-                    self.closed_event(ConnectionClosedReason::PoolClosed),
-                );
-            }
-        }
     }
 }

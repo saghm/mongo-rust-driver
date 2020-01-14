@@ -144,6 +144,12 @@ pub enum ErrorKind {
         file_path: String,
     },
 
+    #[error(
+        display = "Attempted to check out a connection from closed pool with address {}",
+        address
+    )]
+    PoolClosedError { address: StreamAddress },
+
     /// The server returned an invalid reply to a database operation.
     #[error(
         display = "The server returned an invalid reply to a database operation: {}",

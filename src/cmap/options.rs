@@ -8,12 +8,13 @@ use crate::{
     bson_util,
     client::auth::Credential,
     event::cmap::CmapEventHandler,
+    feature::AsyncRuntime,
     options::{ClientOptions, TlsOptions},
 };
 
 /// Contains the options for creating a connection pool. While these options are specified at the
 /// client-level, `ConnectionPoolOptions` is exposed for the purpose of CMAP event handling.
-#[derive(Default, Deserialize, TypedBuilder, Derivative)]
+#[derive(Deserialize, TypedBuilder, Derivative)]
 #[derivative(Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPoolOptions {
@@ -21,6 +22,11 @@ pub struct ConnectionPoolOptions {
     /// handshake that each connection makes when it's created.
     #[builder(default)]
     pub app_name: Option<String>,
+
+    #[builder(default)]
+    #[derivative(Debug = "ignore", PartialEq = "ignore")]
+    #[serde(skip)]
+    pub(crate) runtime: AsyncRuntime,
 
     /// The connect timeout passed to each underlying TcpStream when attemtping to connect to the
     /// server.
@@ -87,6 +93,7 @@ impl ConnectionPoolOptions {
     pub(crate) fn from_client_options(options: &ClientOptions) -> Self {
         Self::builder()
             .app_name(options.app_name.clone())
+            .runtime(options.async_runtime.clone())
             .connect_timeout(options.connect_timeout)
             .credential(options.credential.clone())
             .event_handler(options.cmap_event_handler.clone())

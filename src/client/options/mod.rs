@@ -316,7 +316,7 @@ pub struct ClientOptions {
 
     #[derivative(PartialEq = "ignore")]
     #[builder(default)]
-    pub async_runtime: Option<AsyncRuntime>,
+    pub async_runtime: AsyncRuntime,
 
     #[builder(default)]
     original_uri: Option<String>,
@@ -506,7 +506,7 @@ impl From<ClientOptionsParser> for ClientOptions {
             credential: parser.credential,
             cmap_event_handler: None,
             command_event_handler: None,
-            async_runtime: None,
+            async_runtime: Default::default(),
             original_uri: Some(parser.original_uri),
         }
     }

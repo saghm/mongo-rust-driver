@@ -4,7 +4,6 @@ use std::{
     fmt::{self, Display, Formatter},
     ops::{BitXor, Range},
     str,
-    sync::RwLock,
 };
 
 use bson::{bson, doc, spec::BinarySubtype, Bson, Document};
@@ -13,6 +12,7 @@ use lazy_static::lazy_static;
 use md5::Md5;
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
+use tokio::sync::RwLock;
 
 use crate::{
     bson_util,
@@ -61,7 +61,7 @@ pub(crate) enum ScramVersion {
 
 impl ScramVersion {
     /// Perform SCRAM authentication for a given stream.
-    pub(crate) fn authenticate_stream(
+    pub(crate) async fn authenticate_stream(
         &self,
         conn: &mut Connection,
         credential: &Credential,
@@ -109,7 +109,7 @@ impl ScramVersion {
             mechanism: self.clone(),
         };
         let (should_update_cache, salted_password) =
-            match CREDENTIAL_CACHE.read().unwrap().get(&cache_entry_key) {
+            match CREDENTIAL_CACHE.read().await.get(&cache_entry_key) {
                 Some(pwd) => (false, pwd.clone()),
                 None => (
                     true,
@@ -175,10 +175,10 @@ impl ScramVersion {
         }
 
         if should_update_cache {
-            if let Ok(ref mut cache) = CREDENTIAL_CACHE.write() {
-                if cache.get(&cache_entry_key).is_none() {
-                    cache.insert(cache_entry_key, salted_password);
-                }
+            let mut cache = CREDENTIAL_CACHE.write().await;
+
+            if cache.get(&cache_entry_key).is_none() {
+                cache.insert(cache_entry_key, salted_password);
             }
         }
 

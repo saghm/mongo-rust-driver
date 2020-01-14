@@ -14,7 +14,6 @@ use crate::{
     db::Database,
     error::{ErrorKind, Result},
     event::command::CommandEventHandler,
-    feature::AsyncRuntime,
     operation::ListDatabases,
     options::{ClientOptions, DatabaseOptions},
     sdam::{Server, ServerType, Topology},
@@ -62,7 +61,6 @@ pub struct Client {
 struct ClientInner {
     topology: Arc<RwLock<Topology>>,
     options: ClientOptions,
-    runtime: AsyncRuntime,
 }
 
 impl Client {
@@ -78,34 +76,9 @@ impl Client {
     }
 
     /// Creates a new `Client` connected to the cluster specified by `options`.
-    pub async fn with_options(mut options: ClientOptions) -> Result<Self> {
-        let runtime = match options.async_runtime.take() {
-            Some(runtime) => runtime,
-
-            // If no runtime is given, use tokio if enabled.
-            #[cfg(feature = "tokio-runtime")]
-            None => AsyncRuntime::Tokio,
-
-            // If no runtime is given and tokio is not enabled, use async-std if enabled.
-            #[cfg(all(not(feature = "tokio-runtime"), feature = "async-std-runtime"))]
-            None => AsyncRuntime::AsyncStd,
-
-            // If no runtime is given and neither tokio or async-std is enabled, return a
-            // ConfigurationError.
-            #[cfg(all(not(feature = "tokio-runtime"), not(feature = "async-std-runtime")))]
-            None => {
-                return Err(ErrorKind::ConfigurationError {
-                    message: "tokio and async-std are not enabled, but no custom runtime was \
-                              provided"
-                        .into(),
-                }
-                .into())
-            }
-        };
-
+    pub async fn with_options(options: ClientOptions) -> Result<Self> {
         let inner = Arc::new(ClientInner {
-            topology: Topology::new(runtime.clone(), options.clone()).await?,
-            runtime,
+            topology: Topology::new(options.clone()).await?,
             options,
         });
 

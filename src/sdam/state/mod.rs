@@ -16,7 +16,6 @@ use super::TopologyDescription;
 use crate::{
     cmap::Command,
     error::Result,
-    feature::AsyncRuntime,
     options::{ClientOptions, StreamAddress},
     sdam::{
         description::server::{ServerDescription, ServerType},
@@ -36,17 +35,12 @@ pub(crate) struct Topology {
     pub(crate) servers: HashMap<StreamAddress, Arc<Server>>,
 
     options: ClientOptions,
-
-    runtime: AsyncRuntime,
 }
 
 impl Topology {
     /// Creates a new Topology given the `options`. Arc<RwLock<Topology> is returned rather than
     /// just Topology so that monitoring threads can hold a Weak reference to it.
-    pub(crate) async fn new(
-        runtime: AsyncRuntime,
-        mut options: ClientOptions,
-    ) -> Result<Arc<RwLock<Self>>> {
+    pub(crate) async fn new(mut options: ClientOptions) -> Result<Arc<RwLock<Self>>> {
         let description = TopologyDescription::new(options.clone())?;
         let hosts: Vec<_> = options.hosts.drain(..).collect();
 
@@ -54,7 +48,6 @@ impl Topology {
             description,
             servers: Default::default(),
             options,
-            runtime,
         }));
 
         {
@@ -97,7 +90,7 @@ impl Topology {
             let server_type = server_desc.server_type;
             let (sender, receiver) = tokio::sync::oneshot::channel();
 
-            self.runtime.execute(async move {
+            self.options.async_runtime.execute(async move {
                 server.monitor_check(server_type).await;
                 let _ = sender.send(());
             });
@@ -127,9 +120,9 @@ impl Topology {
         self.servers.insert(address, server.clone());
 
         let monitor_heartbeat_freq = options.heartbeat_freq;
-        let monitor_runtime = self.runtime.clone();
+        let monitor_runtime = self.options.async_runtime.clone();
 
-        self.runtime.execute(async move {
+        self.options.async_runtime.execute(async move {
             monitor_server(
                 monitor_runtime,
                 Arc::downgrade(&server),
@@ -189,5 +182,12 @@ pub(crate) async fn update_topology(
     // the info over.
     let mut topology_lock = topology.write().await;
     topology_lock.description = topology_clone.description;
+
+    for (address, server) in topology_lock.servers.drain() {
+        if !topology_clone.servers.contains_key(&address) {
+            server.close();
+        }
+    }
+    
     topology_lock.servers = topology_clone.servers;
 }

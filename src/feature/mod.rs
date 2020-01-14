@@ -37,6 +37,34 @@ pub enum AsyncRuntime {
     Custom(#[derivative(Debug = "ignore")] CustomAsyncRuntime),
 }
 
+impl Default for AsyncRuntime {
+    fn default() -> Self {
+        // If no runtime is given, use tokio if enabled.
+        #[cfg(feature = "tokio-runtime")]
+        {
+            AsyncRuntime::Tokio
+        }
+
+        // If no runtime is given and tokio is not enabled, use async-std if enabled.
+        #[cfg(all(not(feature = "tokio-runtime"), feature = "async-std-runtime"))]
+        {
+            AsyncRuntime::AsyncStd
+        }
+
+        // If no runtime is given and neither tokio or async-std is enabled, return a
+        // ConfigurationError.
+        #[cfg(all(
+            not(feature = "tokio-runtime"),
+            not(feature = "async-std-runtime"),
+            not(feature = "custom-runtime")
+        ))]
+        compile_error!(
+            "One of the `tokio-runtime`, `async-runtime`, or `custom-runtime` features must be \
+             enabled."
+        )
+    }
+}
+
 impl AsyncRuntime {
     pub(crate) fn execute<F>(&self, fut: F)
     where

@@ -42,7 +42,8 @@ impl Client {
             .select_server(op.selection_criteria())
             .await?
             .1
-            .checkout_connection()?;
+            .checkout_connection()
+            .await?;
         self.execute_operation_on_connection(op, &mut conn)
             .await
             .map(|r| (r, conn))
@@ -65,16 +66,24 @@ impl Client {
             Some(conn) => self.execute_operation_on_connection(op, conn).await,
             None => {
                 let (server_type, server) = self.select_server(op.selection_criteria()).await?;
-                let mut conn = server.checkout_connection()?;
-
+                let mut conn = server.checkout_connection().await?;
                 let result = self.execute_operation_on_connection(op, &mut conn).await;
+
+                let wire_version = conn
+                    .stream_description()
+                    .map(|sd| sd.max_wire_version)
+                    .ok()
+                    .and_then(std::convert::identity)
+                    .unwrap_or(0);
+
+                server.checkin_connection(conn).await;
 
                 // If we encounter certain errors, we must update the topology as per the
                 // SDAM spec.
                 if let Err(ref e) = result {
                     let update = || {
                         let description =
-                            ServerDescription::new(conn.address().clone(), Some(Err(e.clone())));
+                            ServerDescription::new(server.address.clone(), Some(Err(e.clone())));
                         update_topology(self.topology(), description)
                     };
 
@@ -86,13 +95,6 @@ impl Client {
                         // For "node is recovering" or "not master" errors, we must request a
                         // topology check.
                         server.monitor_check(server_type).await;
-
-                        let wire_version = conn
-                            .stream_description()
-                            .map(|sd| sd.max_wire_version)
-                            .ok()
-                            .and_then(std::convert::identity)
-                            .unwrap_or(0);
 
                         // in 4.2+, we only clear connection pool if we've received a
                         // "node is shutting down" error. Otherwise, we always clear the pool.
