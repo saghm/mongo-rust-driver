@@ -41,7 +41,7 @@ pub(crate) struct Server {
 }
 
 impl Server {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         topology: Weak<RwLock<Topology>>,
         address: StreamAddress,
         options: &ClientOptions,
@@ -52,7 +52,8 @@ impl Server {
             0,
             options.connect_timeout,
             options.tls_options(),
-        )?);
+            options.async_runtime.clone(),
+        ).await?);
 
         Ok(Self {
             topology,

@@ -5,7 +5,7 @@ use std::future::Future;
 
 use derivative::Derivative;
 
-use self::stream::AsyncStream;
+pub(crate) use self::stream::AsyncStream;
 use crate::{cmap::conn::StreamOptions, error::Result};
 
 #[cfg(feature = "custom-runtime")]

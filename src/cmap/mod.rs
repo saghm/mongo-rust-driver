@@ -408,7 +408,8 @@ impl ConnectionPool {
             self.generation.load(Ordering::SeqCst),
             self.connect_timeout,
             self.tls_options.clone(),
-        )?;
+            self.runtime.clone(),
+        ).await?;
 
         self.emit_event(|handler| {
             handler.handle_connection_created_event(connection.created_event())

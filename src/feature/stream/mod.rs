@@ -3,6 +3,8 @@ pub(super) mod connect;
 
 use std::{pin::Pin, time::Duration};
 
+use tokio::io::{AsyncRead, AsyncWrite};
+
 use crate::{cmap::conn::StreamOptions, error::Result};
 
 #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
@@ -209,4 +211,7 @@ impl AsyncStream {
 
         Ok(count)
     }
+}
+
+impl AsyncRead for AsyncStream {
 }

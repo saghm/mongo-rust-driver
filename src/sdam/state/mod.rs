@@ -54,7 +54,7 @@ impl Topology {
             let mut topology_lock = topology.write().await;
 
             for address in hosts {
-                topology_lock.add_new_server(address, &topology)?;
+                topology_lock.add_new_server(address, &topology).await?;
             }
         }
 
@@ -101,7 +101,7 @@ impl Topology {
         futures::future::select_all(futures).await.1 == 0
     }
 
-    fn add_new_server(
+    async fn add_new_server(
         &mut self,
         address: StreamAddress,
         wrapped_topology: &Arc<RwLock<Topology>>,
@@ -116,20 +116,17 @@ impl Topology {
             Arc::downgrade(wrapped_topology),
             address.clone(),
             &options,
-        )?);
+        ).await?);
         self.servers.insert(address, server.clone());
 
         let monitor_heartbeat_freq = options.heartbeat_freq;
         let monitor_runtime = self.options.async_runtime.clone();
 
-        self.options.async_runtime.execute(async move {
-            monitor_server(
-                monitor_runtime,
-                Arc::downgrade(&server),
-                monitor_heartbeat_freq,
-            )
-            .await;
-        });
+        monitor_server(
+            monitor_runtime,
+            Arc::downgrade(&server),
+            monitor_heartbeat_freq,
+        );
 
         Ok(())
     }
@@ -140,7 +137,7 @@ impl Topology {
     /// This must **ONLY** be called on a copy of a topology, not one that is stored in a client.
     /// The `wrapped_topology` parameter should contain a reference to the Topology that is actually
     /// stored in a client.
-    pub(crate) fn update_state(
+    pub(crate) async fn update_state(
         &mut self,
         server: ServerDescription,
         wrapped_topology: &Arc<RwLock<Topology>>,
@@ -150,7 +147,7 @@ impl Topology {
         let addresses: HashSet<_> = self.description.server_addresses().cloned().collect();
 
         for address in addresses.iter() {
-            self.add_new_server(address.clone(), wrapped_topology)?;
+            self.add_new_server(address.clone(), wrapped_topology).await?;
         }
 
         self.servers
@@ -176,7 +173,7 @@ pub(crate) async fn update_topology(
     // check the fields of an Unknown server, and we only return Unknown server descriptions when
     // errors occur. Once we implement SDAM monitoring, we can properly inform users of errors that
     // occur here.
-    let _ = topology_clone.update_state(server_description, &topology);
+    let _ = topology_clone.update_state(server_description, &topology).await;
 
     // Now that we have the proper state in the copy, acquire a lock on the proper topology and move
     // the info over.

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use derivative::Derivative;
 
-use self::{stream::Stream, wire::Message};
+use self::{wire::Message};
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
@@ -18,6 +18,7 @@ use crate::{
         ConnectionCreatedEvent,
         ConnectionReadyEvent,
     },
+    feature::{AsyncRuntime, AsyncStream},
     options::{StreamAddress, TlsOptions},
 };
 
@@ -51,24 +52,28 @@ pub(crate) struct Connection {
     /// to detect if the connection is idle.
     ready_and_available_time: Option<Instant>,
 
-    stream: Stream,
+    #[derivative(Debug = "ignore")]
+    stream: AsyncStream,
 }
 
 impl Connection {
     /// Constructs a new connection.
-    pub(crate) fn new(
+    pub(crate) async fn new(
         id: u32,
         address: StreamAddress,
         generation: u32,
         connect_timeout: Option<Duration>,
         tls_options: Option<TlsOptions>,
+        runtime: AsyncRuntime,
     ) -> Result<Self> {
+        let options = StreamOptions { address: address.clone(), connect_timeout, tls_options: tls_options.clone() };
+        
         let conn = Self {
             id,
             generation,
             stream_description: None,
             ready_and_available_time: None,
-            stream: Stream::connect(address.clone(), connect_timeout, tls_options)?,
+            stream: runtime.connect_stream(options).await?,
             address,
         };
 

@@ -11,6 +11,7 @@ use super::{
 use crate::{
     cmap::conn::command::Command,
     error::{ErrorKind, Result},
+    feature::AsyncStream,
 };
 
 /// Represents an OP_MSG wire protocol operation.
@@ -75,7 +76,7 @@ impl Message {
     }
 
     /// Reads bytes from `reader` and deserializes them into a Message.
-    pub(crate) fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
+    pub(crate) fn read_from(reader: &mut AsyncStream) -> Result<Self> {
         let header = Header::read_from(reader)?;
         let mut length_remaining = header.length - Header::LENGTH as i32;
 
