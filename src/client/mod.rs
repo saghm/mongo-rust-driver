@@ -17,7 +17,7 @@ use crate::{
     feature::AsyncRuntime,
     operation::ListDatabases,
     options::{ClientOptions, DatabaseOptions},
-    sdam::{Server, ServerType, Topology, TopologyUpdateCondvar},
+    sdam::{Server, ServerType, Topology},
     selection_criteria::{ReadPreference, SelectionCriteria},
 };
 
@@ -63,9 +63,6 @@ struct ClientInner {
     topology: Arc<RwLock<Topology>>,
     options: ClientOptions,
     runtime: AsyncRuntime,
-
-    #[derivative(Debug = "ignore")]
-    condvar: TopologyUpdateCondvar,
 }
 
 impl Client {
@@ -82,8 +79,6 @@ impl Client {
 
     /// Creates a new `Client` connected to the cluster specified by `options`.
     pub async fn with_options(mut options: ClientOptions) -> Result<Self> {
-        let condvar = TopologyUpdateCondvar::new();
-
         let runtime = match options.async_runtime.take() {
             Some(runtime) => runtime,
 
@@ -109,9 +104,8 @@ impl Client {
         };
 
         let inner = Arc::new(ClientInner {
-            topology: Topology::new(runtime.clone(), condvar.clone(), options.clone()).await?,
+            topology: Topology::new(runtime.clone(), options.clone()).await?,
             runtime,
-            condvar,
             options,
         });
 

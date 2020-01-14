@@ -11,6 +11,5 @@ pub(crate) use self::{
         server::{Server, MIN_HEARTBEAT_FREQUENCY},
         update_topology,
         Topology,
-        TopologyUpdateCondvar,
     },
 };

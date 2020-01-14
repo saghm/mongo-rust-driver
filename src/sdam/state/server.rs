@@ -1,7 +1,7 @@
 use std::{
     convert::TryInto,
     ops::DerefMut,
-    sync::{Condvar, Weak},
+    sync::Weak,
 };
 
 use bson::{bson, doc};
@@ -38,10 +38,6 @@ pub(crate) struct Server {
     /// The connection pool for the server.
     pool: ConnectionPool,
 
-    condvar: Condvar,
-
-    condvar_mutex: Mutex<()>,
-
     monitoring_connection: Mutex<Connection>,
 
     #[derivative(Debug = "ignore")]
@@ -69,8 +65,6 @@ impl Server {
                 address.clone(),
                 Some(ConnectionPoolOptions::from_client_options(options)),
             ),
-            condvar: Default::default(),
-            condvar_mutex: Default::default(),
             address,
             monitoring_connection,
             last_check: Mutex::new(None),

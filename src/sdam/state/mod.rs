@@ -2,14 +2,14 @@ pub(super) mod server;
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Condvar},
+    sync::Arc,
     time::Duration,
 };
 
 use derivative::Derivative;
 use futures::future::{BoxFuture, FutureExt};
 use futures_timer::Delay;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 use self::server::Server;
 use super::TopologyDescription;
@@ -25,25 +25,6 @@ use crate::{
     selection_criteria::SelectionCriteria,
 };
 
-#[derive(Clone)]
-pub(crate) struct TopologyUpdateCondvar {
-    condvar: Arc<Condvar>,
-    mutex: Arc<Mutex<()>>,
-}
-
-impl TopologyUpdateCondvar {
-    pub(crate) fn new() -> Self {
-        Self {
-            condvar: Arc::new(Condvar::new()),
-            mutex: Default::default(),
-        }
-    }
-
-    fn notify(&self) {
-        self.condvar.notify_all()
-    }
-}
-
 /// Contains the SDAM state for a Client.
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
@@ -53,9 +34,6 @@ pub(crate) struct Topology {
 
     /// The state associated with each server in the cluster.
     pub(crate) servers: HashMap<StreamAddress, Arc<Server>>,
-
-    #[derivative(Debug = "ignore")]
-    condvar: TopologyUpdateCondvar,
 
     options: ClientOptions,
 
@@ -67,7 +45,6 @@ impl Topology {
     /// just Topology so that monitoring threads can hold a Weak reference to it.
     pub(crate) async fn new(
         runtime: AsyncRuntime,
-        condvar: TopologyUpdateCondvar,
         mut options: ClientOptions,
     ) -> Result<Arc<RwLock<Self>>> {
         let description = TopologyDescription::new(options.clone())?;
@@ -76,7 +53,6 @@ impl Topology {
         let topology = Arc::new(RwLock::new(Topology {
             description,
             servers: Default::default(),
-            condvar,
             options,
             runtime,
         }));
@@ -90,10 +66,6 @@ impl Topology {
         }
 
         Ok(topology)
-    }
-
-    pub(crate) fn notify(&self) {
-        self.condvar.notify()
     }
 
     pub(crate) fn update_command_with_read_pref(
@@ -218,5 +190,4 @@ pub(crate) async fn update_topology(
     let mut topology_lock = topology.write().await;
     topology_lock.description = topology_clone.description;
     topology_lock.servers = topology_clone.servers;
-    topology_lock.notify();
 }
