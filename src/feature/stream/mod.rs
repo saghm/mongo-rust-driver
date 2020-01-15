@@ -1,7 +1,5 @@
 #[cfg(feature = "custom-runtime")]
 pub(super) mod connect;
-#[cfg(feature = "async-std-runtime")]
-mod error_convert;
 
 use std::{
     ops::DerefMut,
@@ -12,13 +10,17 @@ use std::{
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use self::error_convert::convert_error;
 use crate::{cmap::conn::StreamOptions, error::Result};
 
 #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub(crate) enum AsyncStream {
+pub(crate) struct AsyncStream {
+    bytes_read: usize,
+    inner: AsyncStreamInner,
+}
+
+enum AsyncStreamInner {
     #[cfg(feature = "tokio-runtime")]
     Tokio(tokio::net::TcpStream),
 
@@ -38,21 +40,30 @@ pub(crate) enum AsyncStream {
 #[cfg(feature = "tokio-runtime")]
 impl From<tokio::net::TcpStream> for AsyncStream {
     fn from(stream: tokio::net::TcpStream) -> Self {
-        Self::Tokio(stream)
+        Self {
+            inner: AsyncStreamInner::Tokio(stream),
+            bytes_read: 0,
+        }
     }
 }
 
 #[cfg(feature = "async-std-runtime")]
 impl From<async_std::net::TcpStream> for AsyncStream {
     fn from(stream: async_std::net::TcpStream) -> Self {
-        Self::AsyncStd(stream)
+        Self {
+            inner: AsyncStreamInner::AsyncStd(stream),
+            bytes_read: 0,
+        }
     }
 }
 
 #[cfg(feature = "custom-runtime")]
 impl From<Box<dyn connect::AsyncReadWrite>> for AsyncStream {
     fn from(stream: Box<dyn connect::AsyncReadWrite>) -> Self {
-        Self::Custom(stream.into())
+        Self {
+            inner: AsyncStreamInner::Custom(stream.into()),
+            bytes_read: 0,
+        }
     }
 }
 
@@ -83,7 +94,7 @@ impl AsyncStream {
 
         inner.set_nodelay(true)?;
 
-        match options.tls_options {
+        let inner = match options.tls_options {
             Some(cfg) => {
                 let name = DNSNameRef::try_from_ascii_str(&options.address.hostname)?;
                 let mut tls_config = cfg.into_rustls_config()?;
@@ -93,10 +104,15 @@ impl AsyncStream {
                     .connect(name, inner)
                     .await?;
 
-                Ok(Self::TokioTls(session))
+                AsyncStreamInner::TokioTls(session)
             }
-            None => Ok(Self::Tokio(inner)),
-        }
+            None => AsyncStreamInner::Tokio(inner),
+        };
+
+        Ok(Self {
+            inner,
+            bytes_read: 0,
+        })
     }
 
     #[cfg(feature = "async-std-runtime")]
@@ -123,7 +139,7 @@ impl AsyncStream {
 
         inner.set_nodelay(true)?;
 
-        match options.tls_options {
+        let inner = match options.tls_options {
             Some(cfg) => {
                 let mut tls_config = cfg.into_rustls_config()?;
                 tls_config.enable_sni = true;
@@ -132,85 +148,99 @@ impl AsyncStream {
                     .connect(options.address.hostname, inner)?
                     .await?;
 
-                Ok(Self::AsyncStdTls(session))
+                AsyncStreamInner::AsyncStdTls(session)
             }
-            None => Ok(Self::AsyncStd(inner)),
-        }
+            None => AsyncStreamInner::AsyncStd(inner),
+        };
+
+        Ok(Self {
+            inner,
+            bytes_read: 0,
+        })
+    }
+
+    pub(crate) fn bytes_read(&self) -> usize {
+        self.bytes_read
+    }
+
+    pub(crate) fn reset_bytes_read(&mut self) {
+        self.bytes_read = 0;
     }
 
     pub(crate) async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let count = match self {
+        let count = match self.inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => {
+            AsyncStreamInner::Tokio(ref mut stream) => {
                 use tokio::io::AsyncReadExt;
 
                 stream.read(buf).await?
             }
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => {
+            AsyncStreamInner::TokioTls(ref mut stream) => {
                 use tokio::io::AsyncReadExt;
 
                 stream.read(buf).await?
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::ReadExt;
 
                 stream.read(buf).await?
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::ReadExt;
 
                 stream.read(buf).await?
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => {
+            AsyncStreamInner::Custom(ref mut stream) => {
                 use tokio::io::AsyncReadExt;
 
                 stream.read(buf).await?
             }
         };
 
+        self.bytes_read += count;
         Ok(count)
     }
 
     pub(crate) async fn write(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let count = match self {
+        let count = match self.inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => {
+            AsyncStreamInner::Tokio(ref mut stream) => {
                 use tokio::io::AsyncWriteExt;
 
                 stream.write(buf).await?
             }
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => {
+            AsyncStreamInner::TokioTls(ref mut stream) => {
                 use tokio::io::AsyncWriteExt;
 
                 stream.write(buf).await?
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::prelude::WriteExt;
 
                 stream.write(buf).await?
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::prelude::WriteExt;
 
                 stream.write(buf).await?
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => {
+            AsyncStreamInner::Custom(ref mut stream) => {
                 use tokio::io::AsyncWriteExt;
 
                 stream.write(buf).await?
@@ -223,120 +253,120 @@ impl AsyncStream {
 
 impl AsyncRead for AsyncStream {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<tokio::io::Result<usize>> {
-        match self.deref_mut() {
+        match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
+            AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
+            AsyncStreamInner::TokioTls(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::Read;
 
-                Pin::new(stream).poll_read(cx, buf).map_err(convert_error)
+                Pin::new(stream).poll_read(cx, buf)
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::Read;
 
-                Pin::new(stream).poll_read(cx, buf).map_err(convert_error)
+                Pin::new(stream).poll_read(cx, buf)
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => stream.as_mut().poll_read(cx, buf),
+            AsyncStreamInner::Custom(ref mut stream) => stream.as_mut().poll_read(cx, buf),
         }
     }
 }
 
 impl AsyncWrite for AsyncStream {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<tokio::io::Result<usize>> {
-        match self.deref_mut() {
+        match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
+            AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
+            AsyncStreamInner::TokioTls(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_write(cx, buf).map_err(convert_error)
+                Pin::new(stream).poll_write(cx, buf)
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_write(cx, buf).map_err(convert_error)
+                Pin::new(stream).poll_write(cx, buf)
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => stream.as_mut().poll_write(cx, buf),
+            AsyncStreamInner::Custom(ref mut stream) => stream.as_mut().poll_write(cx, buf),
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        match self.deref_mut() {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
+        match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => Pin::new(stream).poll_flush(cx),
+            AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_flush(cx),
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => Pin::new(stream).poll_flush(cx),
+            AsyncStreamInner::TokioTls(ref mut stream) => Pin::new(stream).poll_flush(cx),
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_flush(cx).map_err(convert_error)
+                Pin::new(stream).poll_flush(cx)
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_flush(cx).map_err(convert_error)
+                Pin::new(stream).poll_flush(cx)
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => stream.as_mut().poll_flush(cx),
+            AsyncStreamInner::Custom(ref mut stream) => stream.as_mut().poll_flush(cx),
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        match self.deref_mut() {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
+        match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
-            Self::Tokio(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
+            AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
 
             #[cfg(feature = "tokio-runtime")]
-            Self::TokioTls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
+            AsyncStreamInner::TokioTls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStd(ref mut stream) => {
+            AsyncStreamInner::AsyncStd(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_close(cx).map_err(convert_error)
+                Pin::new(stream).poll_close(cx)
             }
 
             #[cfg(feature = "async-std-runtime")]
-            Self::AsyncStdTls(ref mut stream) => {
+            AsyncStreamInner::AsyncStdTls(ref mut stream) => {
                 use async_std::io::Write;
 
-                Pin::new(stream).poll_close(cx).map_err(convert_error)
+                Pin::new(stream).poll_close(cx)
             }
 
             #[cfg(feature = "custom-runtime")]
-            Self::Custom(ref mut stream) => stream.as_mut().poll_shutdown(cx),
+            AsyncStreamInner::Custom(ref mut stream) => stream.as_mut().poll_shutdown(cx),
         }
     }
 }

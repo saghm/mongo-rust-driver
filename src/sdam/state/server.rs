@@ -132,7 +132,7 @@ impl Server {
         let mut conn = self.monitoring_connection.lock().await;
         let address = conn.address().clone();
 
-        match is_master(conn.deref_mut()) {
+        match is_master(conn.deref_mut()).await {
             Ok(reply) => return ServerDescription::new(address, Some(Ok(reply))),
             Err(e) => {
                 self.clear_connection_pool();
@@ -143,11 +143,11 @@ impl Server {
             }
         }
 
-        ServerDescription::new(address, Some(is_master(conn.deref_mut())))
+        ServerDescription::new(address, Some(is_master(conn.deref_mut()).await))
     }
 }
 
-fn is_master(conn: &mut Connection) -> Result<IsMasterReply> {
+async fn is_master(conn: &mut Connection) -> Result<IsMasterReply> {
     let command = Command::new_read(
         "isMaster".into(),
         "admin".into(),
@@ -156,7 +156,7 @@ fn is_master(conn: &mut Connection) -> Result<IsMasterReply> {
     );
 
     let start_time = Instant::now();
-    let command_response = conn.send_command(command, None)?;
+    let command_response = conn.send_command(command, None).await?;
     let end_time = Instant::now();
 
     let command_response = command_response.body()?;

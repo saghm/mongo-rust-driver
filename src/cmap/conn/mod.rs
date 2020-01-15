@@ -3,10 +3,7 @@ mod stream;
 mod stream_description;
 mod wire;
 
-use std::{
-    pin::Pin,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use derivative::Derivative;
 
@@ -178,12 +175,10 @@ impl Connection {
         command: Command,
         request_id: impl Into<Option<i32>>,
     ) -> Result<CommandResponse> {
-        let stream = Pin::new(&mut self.stream);
-
         let message = Message::with_command(command, request_id.into());
-        message.write_to(stream).await?;
+        message.write_to(&mut self.stream).await?;
 
-        let response_message = Message::read_from(stream).await?;
+        let response_message = Message::read_from(&mut self.stream).await?;
         CommandResponse::new(self.address.clone(), response_message)
     }
 

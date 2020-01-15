@@ -1,16 +1,13 @@
-use std::pin::Pin;
-
 use bitflags::bitflags;
 use bson::Document;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::{
-    header::{Header, OpCode},
-    util::CountReader,
-};
+use super::header::{Header, OpCode};
 use crate::{
+    bson_util::{async_decode, async_encode},
     cmap::conn::command::Command,
     error::{ErrorKind, Result},
+    feature::AsyncStream,
 };
 
 /// Represents an OP_MSG wire protocol operation.
@@ -75,22 +72,22 @@ impl Message {
     }
 
     /// Reads bytes from `reader` and deserializes them into a Message.
-    pub(crate) async fn read_from<R: AsyncRead>(reader: Pin<&mut R>) -> Result<Self> {
+    pub(crate) async fn read_from(reader: &mut AsyncStream) -> Result<Self> {
+        reader.reset_bytes_read();
+
         let header = Header::read_from(reader).await?;
         let mut length_remaining = header.length - Header::LENGTH as i32;
 
         let flags = MessageFlags::from_bits_truncate(reader.read_u32().await?);
         length_remaining -= std::mem::size_of::<u32>() as i32;
 
-        let mut count_reader_plain = CountReader::new(reader);
-        let count_reader = Pin::new(&mut count_reader_plain);
         let mut sections = Vec::new();
 
-        while length_remaining - count_reader.bytes_read() as i32 > 4 {
-            sections.push(MessageSection::read(count_reader).await?);
+        while length_remaining - reader.bytes_read() as i32 > 4 {
+            sections.push(MessageSection::read(reader).await?);
         }
 
-        length_remaining -= count_reader.bytes_read() as i32;
+        length_remaining -= reader.bytes_read() as i32;
 
         let mut checksum = None;
 
@@ -102,7 +99,7 @@ impl Message {
                     "The server indicated that the reply would be {} bytes long, but it instead \
                      was {}",
                     header.length,
-                    header.length - length_remaining + count_reader.bytes_read() as i32,
+                    header.length - length_remaining + reader.bytes_read() as i32,
                 ),
             }
             .into());
@@ -118,11 +115,11 @@ impl Message {
     }
 
     /// Serializes the Message to bytes and writes them to `writer`.
-    pub(crate) async fn write_to<W: AsyncWrite>(&self, writer: Pin<&mut W>) -> Result<()> {
+    pub(crate) async fn write_to(&self, writer: &mut AsyncStream) -> Result<()> {
         let mut sections_bytes = Vec::new();
 
         for section in &self.sections {
-            section.write(Pin::new(&mut sections_bytes)).await?;
+            section.write(&mut sections_bytes).await?;
         }
 
         let total_length = Header::LENGTH
@@ -177,11 +174,13 @@ pub(crate) enum MessageSection {
 
 impl MessageSection {
     /// Reads bytes from `reader` and deserializes them into a MessageSection.
-    async fn read<R: AsyncRead>(reader: Pin<&mut R>) -> Result<Self> {
+    async fn read(reader: &mut AsyncStream) -> Result<Self> {
         let payload_type = reader.read_u8().await?;
 
         if payload_type == 0 {
-            return Ok(MessageSection::Document(bson::decode_document(reader)?));
+            return Ok(MessageSection::Document(
+                async_decode::decode_document(reader).await?,
+            ));
         }
 
         let size = reader.read_i32().await?;
@@ -191,19 +190,20 @@ impl MessageSection {
         length_remaining -= reader.read_to_string(&mut identifier).await? as i32;
 
         let mut documents = Vec::new();
-        let mut count_reader = CountReader::new(reader);
+        let bytes_read_before_sequence = reader.bytes_read();
+        let mut bytes_read_from_sequence = 0;
 
-        while length_remaining - count_reader.bytes_read() as i32 > 0 {
-            documents.push(bson::decode_document(&mut count_reader)?);
+        while length_remaining > bytes_read_from_sequence as i32 {
+            documents.push(async_decode::decode_document(reader).await?);
+            bytes_read_from_sequence = reader.bytes_read() - bytes_read_before_sequence;
         }
 
-        if length_remaining - count_reader.bytes_read() as i32 != 0 {
+        if length_remaining != bytes_read_from_sequence as i32 {
             return Err(ErrorKind::OperationError {
                 message: format!(
                     "The server indicated that the reply would be {} bytes long, but it instead \
                      was {}",
-                    size,
-                    size - length_remaining + count_reader.bytes_read() as i32,
+                    size, bytes_read_from_sequence as i32,
                 ),
             }
             .into());
@@ -217,13 +217,13 @@ impl MessageSection {
     }
 
     /// Serializes the MessageSection to bytes and writes them to `writer`.
-    async fn write<W: AsyncWrite>(&self, writer: Pin<&mut W>) -> Result<()> {
+    async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
         match self {
             Self::Document(doc) => {
                 // Write payload type.
                 writer.write_u8(0).await?;
 
-                bson::encode_document(writer, doc)?;
+                async_encode::encode_document(writer, doc).await?;
             }
             Self::Sequence {
                 size,
@@ -237,7 +237,7 @@ impl MessageSection {
                 super::util::write_cstring(writer, identifier).await?;
 
                 for doc in documents {
-                    bson::encode_document(writer, doc)?;
+                    async_encode::encode_document(writer, doc).await?;
                 }
             }
         }

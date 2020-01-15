@@ -1,8 +1,11 @@
 use std::pin::Pin;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::error::{ErrorKind, Result};
+use crate::{
+    error::{ErrorKind, Result},
+    feature::AsyncStream,
+};
 
 /// The wire protocol op codes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -40,7 +43,9 @@ impl Header {
     pub(crate) const LENGTH: usize = 4 * std::mem::size_of::<i32>();
 
     /// Serializes the Header and writes the bytes to `w`.
-    pub(crate) async fn write_to<W: AsyncWrite>(&self, stream: Pin<&mut W>) -> Result<()> {
+    pub(crate) async fn write_to(&self, stream: &mut AsyncStream) -> Result<()> {
+        let mut stream = Pin::new(stream);
+
         stream.write_i32(self.length).await?;
         stream.write_i32(self.request_id).await?;
         stream.write_i32(self.response_to).await?;
@@ -50,7 +55,9 @@ impl Header {
     }
 
     /// Reads bytes from `r` and deserializes them into a header.
-    pub(crate) async fn read_from<R: AsyncRead>(stream: Pin<&mut R>) -> Result<Self> {
+    pub(crate) async fn read_from(stream: &mut AsyncStream) -> Result<Self> {
+        let mut stream = Pin::new(stream);
+
         Ok(Self {
             length: stream.read_i32().await?,
             request_id: stream.read_i32().await?,

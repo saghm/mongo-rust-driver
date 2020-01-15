@@ -26,7 +26,7 @@ impl ConnectionEstablisher {
         connection: &mut Connection,
         credential: Option<&Credential>,
     ) -> Result<()> {
-        self.handshaker.handshake(connection)?;
+        self.handshaker.handshake(connection).await?;
 
         if let Some(credential) = credential {
             credential.authenticate_stream(connection).await?;
