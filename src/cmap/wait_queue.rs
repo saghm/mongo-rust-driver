@@ -87,7 +87,10 @@ pub(super) struct WaitQueueHandle {
 }
 
 impl WaitQueueHandle {
-    pub(super) async fn wait_for_available_connection(&mut self, timeout: Option<Duration>) -> Result<()> {
+    pub(super) async fn wait_for_available_connection(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> Result<()> {
         if let Some(timeout) = timeout {
             match futures::future::select(self.receiver.recv().boxed(), Delay::new(timeout).boxed())
                 .await
@@ -106,7 +109,7 @@ impl WaitQueueHandle {
 
     pub(super) fn exit_queue(self) {
         let queue = self.queue.clone();
-        
+
         self.runtime.execute(async move {
             let mut queue = queue.lock().await;
             queue.pop_front();

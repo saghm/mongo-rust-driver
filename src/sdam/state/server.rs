@@ -46,14 +46,17 @@ impl Server {
         address: StreamAddress,
         options: &ClientOptions,
     ) -> Result<Self> {
-        let monitoring_connection = Mutex::new(Connection::new(
-            0,
-            address.clone(),
-            0,
-            options.connect_timeout,
-            options.tls_options(),
-            options.async_runtime.clone(),
-        ).await?);
+        let monitoring_connection = Mutex::new(
+            Connection::new(
+                0,
+                address.clone(),
+                0,
+                options.connect_timeout,
+                options.tls_options(),
+                options.async_runtime.clone(),
+            )
+            .await?,
+        );
 
         Ok(Self {
             topology,

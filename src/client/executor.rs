@@ -145,15 +145,15 @@ impl Client {
 
         let start_time = Instant::now();
 
-        let response_result =
-            connection
-                .send_command(cmd.clone(), request_id)
-                .and_then(|response| {
-                    if !op.handles_command_errors() {
-                        response.validate()?;
-                    }
-                    Ok(response)
-                });
+        let response_result = connection
+            .send_command(cmd.clone(), request_id)
+            .await
+            .and_then(|response| {
+                if !op.handles_command_errors() {
+                    response.validate()?;
+                }
+                Ok(response)
+            });
 
         let end_time = Instant::now();
         let duration = (end_time - start_time).try_into()?;

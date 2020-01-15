@@ -1,8 +1,8 @@
-use std::io::{Read, Write};
+use std::pin::Pin;
 
 use bitflags::bitflags;
 use bson::Document;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{
     header::{Header, OpCode},
@@ -11,7 +11,6 @@ use super::{
 use crate::{
     cmap::conn::command::Command,
     error::{ErrorKind, Result},
-    feature::AsyncStream,
 };
 
 /// Represents an OP_MSG wire protocol operation.
@@ -76,18 +75,19 @@ impl Message {
     }
 
     /// Reads bytes from `reader` and deserializes them into a Message.
-    pub(crate) fn read_from(reader: &mut AsyncStream) -> Result<Self> {
-        let header = Header::read_from(reader)?;
+    pub(crate) async fn read_from<R: AsyncRead>(reader: Pin<&mut R>) -> Result<Self> {
+        let header = Header::read_from(reader).await?;
         let mut length_remaining = header.length - Header::LENGTH as i32;
 
-        let flags = MessageFlags::from_bits_truncate(reader.read_u32::<LittleEndian>()?);
+        let flags = MessageFlags::from_bits_truncate(reader.read_u32().await?);
         length_remaining -= std::mem::size_of::<u32>() as i32;
 
-        let mut count_reader = CountReader::new(reader);
+        let mut count_reader_plain = CountReader::new(reader);
+        let count_reader = Pin::new(&mut count_reader_plain);
         let mut sections = Vec::new();
 
         while length_remaining - count_reader.bytes_read() as i32 > 4 {
-            sections.push(MessageSection::read(&mut count_reader)?);
+            sections.push(MessageSection::read(count_reader).await?);
         }
 
         length_remaining -= count_reader.bytes_read() as i32;
@@ -95,7 +95,7 @@ impl Message {
         let mut checksum = None;
 
         if length_remaining == 4 && flags.contains(MessageFlags::CHECKSUM_PRESENT) {
-            checksum = Some(reader.read_u32::<LittleEndian>()?);
+            checksum = Some(reader.read_u32().await?);
         } else if length_remaining != 0 {
             return Err(ErrorKind::OperationError {
                 message: format!(
@@ -118,11 +118,11 @@ impl Message {
     }
 
     /// Serializes the Message to bytes and writes them to `writer`.
-    pub(crate) fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub(crate) async fn write_to<W: AsyncWrite>(&self, writer: Pin<&mut W>) -> Result<()> {
         let mut sections_bytes = Vec::new();
 
         for section in &self.sections {
-            section.write(&mut sections_bytes)?;
+            section.write(Pin::new(&mut sections_bytes)).await?;
         }
 
         let total_length = Header::LENGTH
@@ -141,15 +141,15 @@ impl Message {
             op_code: OpCode::Message,
         };
 
-        header.write_to(writer)?;
-        writer.write_u32::<LittleEndian>(self.flags.bits())?;
-        writer.write_all(&sections_bytes)?;
+        header.write_to(writer).await?;
+        writer.write_u32(self.flags.bits()).await?;
+        writer.write_all(&sections_bytes).await?;
 
         if let Some(checksum) = self.checksum {
-            writer.write_u32::<LittleEndian>(checksum)?;
+            writer.write_u32(checksum).await?;
         }
 
-        writer.flush()?;
+        writer.flush().await?;
 
         Ok(())
     }
@@ -177,18 +177,18 @@ pub(crate) enum MessageSection {
 
 impl MessageSection {
     /// Reads bytes from `reader` and deserializes them into a MessageSection.
-    fn read<R: Read>(reader: &mut R) -> Result<Self> {
-        let payload_type = reader.read_u8()?;
+    async fn read<R: AsyncRead>(reader: Pin<&mut R>) -> Result<Self> {
+        let payload_type = reader.read_u8().await?;
 
         if payload_type == 0 {
             return Ok(MessageSection::Document(bson::decode_document(reader)?));
         }
 
-        let size = reader.read_i32::<LittleEndian>()?;
+        let size = reader.read_i32().await?;
         let mut length_remaining = size - std::mem::size_of::<i32>() as i32;
 
         let mut identifier = String::new();
-        length_remaining -= reader.read_to_string(&mut identifier)? as i32;
+        length_remaining -= reader.read_to_string(&mut identifier).await? as i32;
 
         let mut documents = Vec::new();
         let mut count_reader = CountReader::new(reader);
@@ -217,11 +217,11 @@ impl MessageSection {
     }
 
     /// Serializes the MessageSection to bytes and writes them to `writer`.
-    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    async fn write<W: AsyncWrite>(&self, writer: Pin<&mut W>) -> Result<()> {
         match self {
             Self::Document(doc) => {
                 // Write payload type.
-                writer.write_u8(0)?;
+                writer.write_u8(0).await?;
 
                 bson::encode_document(writer, doc)?;
             }
@@ -231,10 +231,10 @@ impl MessageSection {
                 documents,
             } => {
                 // Write payload type.
-                writer.write_u8(1)?;
+                writer.write_u8(1).await?;
 
-                writer.write_i32::<LittleEndian>(*size)?;
-                super::util::write_cstring(writer, identifier)?;
+                writer.write_i32(*size).await?;
+                super::util::write_cstring(writer, identifier).await?;
 
                 for doc in documents {
                     bson::encode_document(writer, doc)?;

@@ -3,11 +3,14 @@ mod stream;
 mod stream_description;
 mod wire;
 
-use std::time::{Duration, Instant};
+use std::{
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use derivative::Derivative;
 
-use self::{wire::Message};
+use self::wire::Message;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
@@ -66,8 +69,12 @@ impl Connection {
         tls_options: Option<TlsOptions>,
         runtime: AsyncRuntime,
     ) -> Result<Self> {
-        let options = StreamOptions { address: address.clone(), connect_timeout, tls_options: tls_options.clone() };
-        
+        let options = StreamOptions {
+            address: address.clone(),
+            connect_timeout,
+            tls_options: tls_options.clone(),
+        };
+
         let conn = Self {
             id,
             generation,
@@ -166,15 +173,17 @@ impl Connection {
     /// An `Ok(...)` result simply means the server received the command and that the driver
     /// driver received the response; it does not imply anything about the success of the command
     /// itself.
-    pub(crate) fn send_command(
+    pub(crate) async fn send_command(
         &mut self,
         command: Command,
         request_id: impl Into<Option<i32>>,
     ) -> Result<CommandResponse> {
-        let message = Message::with_command(command, request_id.into());
-        message.write_to(&mut self.stream)?;
+        let stream = Pin::new(&mut self.stream);
 
-        let response_message = Message::read_from(&mut self.stream)?;
+        let message = Message::with_command(command, request_id.into());
+        message.write_to(stream).await?;
+
+        let response_message = Message::read_from(stream).await?;
         CommandResponse::new(self.address.clone(), response_message)
     }
 

@@ -22,7 +22,11 @@ use tokio::sync::RwLock;
 pub use self::conn::ConnectionInfo;
 pub(crate) use self::conn::{Command, CommandResponse, Connection, StreamDescription};
 
-use self::{establish::ConnectionEstablisher, options::ConnectionPoolOptions, wait_queue::{WaitQueue, WaitQueueHandle}};
+use self::{
+    establish::ConnectionEstablisher,
+    options::ConnectionPoolOptions,
+    wait_queue::{WaitQueue, WaitQueueHandle},
+};
 use crate::{
     client::auth::Credential,
     error::{ErrorKind, Result},
@@ -128,7 +132,7 @@ pub(crate) struct ConnectionPoolInner {
     /// The total number of connections currently in the pool. This includes connections which are
     /// currently checked out of the pool.
     total_connection_count: AtomicU32,
-    
+
     /// Connections are checked out by concurrent threads on a first-come, first-server basis. This
     /// is enforced by threads entering the wait queue when they first try to check out a
     /// connection and then blocking until they are at the front of the queue.
@@ -241,9 +245,11 @@ impl ConnectionPool {
         let start_time = Instant::now();
         let mut handle = self.wait_queue.wait_until_at_front().await?;
 
-        let result = self.acquire_or_create_connection(start_time, &mut handle).await;
+        let result = self
+            .acquire_or_create_connection(start_time, &mut handle)
+            .await;
         handle.exit_queue();
-        
+
         let mut conn = match result {
             Ok(conn) => conn,
             Err(e) => {
@@ -273,7 +279,11 @@ impl ConnectionPool {
 
     /// Waits for the thread to reach the front of the wait queue, then attempts to check out a
     /// connection.
-    async fn acquire_or_create_connection(&self, start_time: Instant, handle: &mut WaitQueueHandle) -> Result<Connection> {
+    async fn acquire_or_create_connection(
+        &self,
+        start_time: Instant,
+        handle: &mut WaitQueueHandle,
+    ) -> Result<Connection> {
         loop {
             let mut state = self.state.write().await;
 
@@ -331,7 +341,9 @@ impl ConnectionPool {
 
                 // Wait until the either the timeout has been reached or a connection is checked
                 // into the pool.
-                handle.wait_for_available_connection(Some(timeout - time_waiting)).await?;
+                handle
+                    .wait_for_available_connection(Some(timeout - time_waiting))
+                    .await?;
             } else {
                 // Wait until a connection has been returned to the pool.
                 handle.wait_for_available_connection(None).await?;
@@ -409,7 +421,8 @@ impl ConnectionPool {
             self.connect_timeout,
             self.tls_options.clone(),
             self.runtime.clone(),
-        ).await?;
+        )
+        .await?;
 
         self.emit_event(|handler| {
             handler.handle_connection_created_event(connection.created_event())
