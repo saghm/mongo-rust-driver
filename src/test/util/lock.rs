@@ -1,20 +1,21 @@
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-#[derive(Default)]
 pub struct TestLock {
     inner: RwLock<()>,
 }
 
 impl TestLock {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            inner: RwLock::new(()),
+        }
     }
 
-    pub fn run_concurrently(&self) -> RwLockReadGuard<()> {
-        self.inner.read().unwrap()
+    pub async fn run_concurrently(&self) -> RwLockReadGuard<'_, ()> {
+        self.inner.read().await
     }
 
-    pub fn run_exclusively(&self) -> RwLockWriteGuard<()> {
-        self.inner.write().unwrap()
+    pub async fn run_exclusively(&self) -> RwLockWriteGuard<'_, ()> {
+        self.inner.write().await
     }
 }

@@ -69,6 +69,11 @@
         clippy::float_cmp
     )
 )]
+#![allow(dead_code)]
+
+#[allow(dead_code)]
+#[macro_use]
+pub mod feature;
 
 #[macro_use]
 pub mod options;
@@ -83,8 +88,6 @@ mod cursor;
 mod db;
 pub mod error;
 pub mod event;
-#[allow(dead_code)]
-pub mod feature;
 mod is_master;
 mod operation;
 pub mod results;
@@ -94,9 +97,9 @@ mod srv;
 #[cfg(test)]
 mod test;
 
-#[cfg(test)]
-#[macro_use]
-extern crate derive_more;
+// #[cfg(test)]
+// #[macro_use]
+// extern crate derive_more;
 
 pub use crate::{
     client::Client,

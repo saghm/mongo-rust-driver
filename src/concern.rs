@@ -137,11 +137,11 @@ impl From<String> for Acknowledgment {
     }
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 use bson::Bson;
 
 impl Acknowledgment {
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn to_bson(&self) -> Bson {
         match self {
             Acknowledgment::Nodes(i) => Bson::I64(i64::from(*i)),

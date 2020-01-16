@@ -53,7 +53,7 @@ pub(crate) struct CommandResponse {
 }
 
 impl CommandResponse {
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn with_document_and_address(source: StreamAddress, doc: Document) -> Self {
         Self {
             source,
@@ -62,7 +62,7 @@ impl CommandResponse {
     }
 
     /// Initialize a response from a document.
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn with_document(doc: Document) -> Self {
         Self::with_document_and_address(
             StreamAddress {

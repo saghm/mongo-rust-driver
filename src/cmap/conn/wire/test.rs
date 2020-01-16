@@ -1,15 +1,12 @@
-use std::net::TcpStream;
-
 use bson::{bson, doc, Bson};
 
 use super::message::{Message, MessageFlags, MessageSection};
 use crate::{
-    options::StreamAddress,
-    test::{CLIENT_OPTIONS, LOCK},
+    cmap::conn::StreamOptions,
+    test::{ASYNC_RUNTIME, CLIENT_OPTIONS, LOCK},
 };
 
-#[test]
-fn basic() {
+define_test! { basic, {
     if CLIENT_OPTIONS.tls_options().is_some() {
         return;
     }
@@ -26,12 +23,12 @@ fn basic() {
         request_id: None,
     };
 
-    let StreamAddress { ref hostname, port } = CLIENT_OPTIONS.hosts[0];
+    let options = StreamOptions::new(CLIENT_OPTIONS.hosts[0].clone(), None, None);
 
-    let mut stream = TcpStream::connect((&hostname[..], port.unwrap_or(27017))).unwrap();
-    message.write_to(&mut stream).unwrap();
+    let mut stream = ASYNC_RUNTIME.connect_stream(options).await.unwrap();
+    message.write_to(&mut stream).await.unwrap();
 
-    let reply = Message::read_from(&mut stream).unwrap();
+    let reply = Message::read_from(&mut stream).await.unwrap();
 
     let response_doc = match reply.sections.into_iter().next().unwrap() {
         MessageSection::Document(doc) => doc,
@@ -39,4 +36,4 @@ fn basic() {
     };
 
     assert_eq!(response_doc.get("ok"), Some(&Bson::FloatingPoint(1.0)));
-}
+}}

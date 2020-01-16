@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc};
 
@@ -17,7 +17,7 @@ pub(crate) struct DropDatabase {
 }
 
 impl DropDatabase {
-    #[cfg(test)]
+    // #[cfg(test)]
     fn empty() -> Self {
         Self::new(String::new(), None)
     }

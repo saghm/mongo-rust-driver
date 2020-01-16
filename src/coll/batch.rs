@@ -24,7 +24,7 @@ pub(crate) fn split_off_batch<T>(
     Vec::new()
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 mod test {
     use super::split_off_batch;
 

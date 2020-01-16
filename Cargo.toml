@@ -14,8 +14,9 @@ version = "0.9.0"
 default = ["tokio-runtime", "async-std-runtime", "custom-runtime"]
 tokio-runtime = [
     "tokio/dns",
-    "tokio/io-util",
+    "tokio/macros",
     "tokio/rt-core",
+    "tokio/rt-threaded",
     "tokio/time",
     "tokio/tcp",
     "tokio-rustls",
@@ -24,7 +25,7 @@ async-std-runtime = [
     "async-std",
     "async-tls",
 ]
-custom-runtime = ["tokio/io-util"]
+custom-runtime = []
 
 [dependencies]
 async-trait = "0.1.22"
@@ -62,6 +63,7 @@ futures = "0.3.1"
 [dependencies.async-std]
 optional = true
 version = "1.4.0"
+features = ["attributes"]
 
 [dependencies.async-tls]
 optional = true
@@ -76,9 +78,8 @@ version = "1.0.98"
 features = ["derive"]
 
 [dependencies.tokio]
-optional = true
 version = "0.2.9"
-features = ["sync"]
+features = ["io-util", "sync"]
 
 [dependencies.tokio-rustls]
 optional = true
@@ -92,3 +93,4 @@ function_name = "0.2.0"
 pretty_assertions = "0.6.1"
 serde_json = "1.0.40"
 semver = "0.9.0"
+paste = "0.1.6"

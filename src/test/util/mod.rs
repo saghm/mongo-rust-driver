@@ -15,14 +15,13 @@ use semver::Version;
 use serde::Deserialize;
 
 use self::event::EventHandler;
+use super::CLIENT_OPTIONS;
 use crate::{
     error::{CommandError, ErrorKind, Result},
     options::{auth::AuthMechanism, ClientOptions},
     Client,
     Collection,
 };
-
-const MAX_POOL_SIZE: u32 = 100;
 
 pub struct TestClient {
     client: Client,
@@ -40,14 +39,12 @@ impl std::ops::Deref for TestClient {
 }
 
 impl TestClient {
-    pub fn new() -> Self {
-        Self::with_handler(None)
+    pub async fn new() -> Self {
+        Self::with_handler(None).await
     }
 
-    fn with_handler(event_handler: Option<EventHandler>) -> Self {
-        let uri = option_env!("MONGODB_URI").unwrap_or("mongodb://localhost:27017");
-        let mut options = ClientOptions::parse(uri).unwrap();
-        options.max_pool_size = Some(MAX_POOL_SIZE);
+    async fn with_handler(event_handler: Option<EventHandler>) -> Self {
+        let mut options = CLIENT_OPTIONS.clone();
 
         if let Some(event_handler) = event_handler {
             let handler = Arc::new(event_handler);
@@ -55,12 +52,13 @@ impl TestClient {
             options.cmap_event_handler = Some(handler);
         }
 
-        let client = Client::with_options(options.clone()).unwrap();
+        let client = Client::with_options(options.clone()).await.unwrap();
 
         let server_info = bson::from_bson(Bson::Document(
             client
                 .database("admin")
                 .run_command(doc! { "isMaster":  1 }, None)
+                .await
                 .unwrap(),
         ))
         .unwrap();
@@ -68,6 +66,7 @@ impl TestClient {
         let response = client
             .database("test")
             .run_command(doc! { "buildInfo": 1 }, None)
+            .await
             .unwrap();
 
         let info: BuildInfo = bson::from_bson(Bson::Document(response)).unwrap();
@@ -81,7 +80,7 @@ impl TestClient {
         }
     }
 
-    pub fn create_user(
+    pub async fn create_user(
         &self,
         user: &str,
         pwd: &str,
@@ -94,7 +93,7 @@ impl TestClient {
             let ms: bson::Array = mechanisms.iter().map(|s| Bson::from(s.as_str())).collect();
             cmd.insert("mechanisms", ms);
         }
-        self.database("admin").run_command(cmd, None)?;
+        self.database("admin").run_command(cmd, None).await?;
         Ok(())
     }
 
@@ -102,9 +101,9 @@ impl TestClient {
         self.database(db_name).collection(coll_name)
     }
 
-    pub fn init_db_and_coll(&self, db_name: &str, coll_name: &str) -> Collection {
+    pub async fn init_db_and_coll(&self, db_name: &str, coll_name: &str) -> Collection {
         let coll = self.get_coll(db_name, coll_name);
-        drop_collection(&coll);
+        drop_collection(&coll).await;
         coll
     }
 
@@ -139,14 +138,14 @@ impl TestClient {
             || (self.server_version.major == major && self.server_version.minor <= minor)
     }
 
-    pub fn drop_collection(&self, db_name: &str, coll_name: &str) {
+    pub async fn drop_collection(&self, db_name: &str, coll_name: &str) {
         let coll = self.get_coll(db_name, coll_name);
-        drop_collection(&coll);
+        drop_collection(&coll).await;
     }
 }
 
-pub fn drop_collection(coll: &Collection) {
-    match coll.drop(None).as_ref().map_err(|e| e.as_ref()) {
+pub async fn drop_collection(coll: &Collection) {
+    match coll.drop(None).await.as_ref().map_err(|e| e.as_ref()) {
         Err(ErrorKind::CommandError(CommandError { code: 26, .. })) | Ok(_) => {}
         e @ Err(_) => {
             e.unwrap();

@@ -1,8 +1,10 @@
 use std::{
+    pin::Pin,
     sync::atomic::{AtomicI32, Ordering},
+    task::{Context, Poll},
 };
 
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{self, AsyncRead, AsyncWrite, AsyncWriteExt};
 
 use crate::error::Result;
 
@@ -29,4 +31,41 @@ pub(super) async fn write_cstring<W: AsyncWrite + Unpin>(
     writer.write_all(&[0]).await?;
 
     Ok(())
+}
+
+/// A wrapper around `tokio::io::AsyncRead` that keeps track of the number of bytes it has read.
+pub(super) struct CountReader<'a, R: AsyncRead + Unpin + Send + 'a> {
+    reader: &'a mut R,
+    bytes_read: usize,
+}
+
+impl<'a, R: AsyncRead + Unpin + Send + 'a> CountReader<'a, R> {
+    /// Constructs a new CountReader that wraps `reader`.
+    pub(super) fn new(reader: &'a mut R) -> Self {
+        CountReader {
+            reader,
+            bytes_read: 0,
+        }
+    }
+
+    /// Gets the number of bytes read so far.
+    pub(super) fn bytes_read(&self) -> usize {
+        self.bytes_read
+    }
+}
+
+impl<'a, R: AsyncRead + Unpin + Send + 'a> AsyncRead for CountReader<'a, R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let result = Pin::new(&mut self.reader).poll_read(cx, buf);
+
+        if let Poll::Ready(Ok(count)) = result {
+            self.bytes_read += count;
+        }
+
+        result
+    }
 }

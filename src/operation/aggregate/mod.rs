@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Bson, Document};
 
@@ -21,7 +21,7 @@ pub(crate) struct Aggregate {
 }
 
 impl Aggregate {
-    #[cfg(test)]
+    // #[cfg(test)]
     fn empty() -> Self {
         Self::new(Namespace::empty(), Vec::new(), None)
     }

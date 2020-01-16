@@ -1,6 +1,6 @@
 mod options;
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Bson, Document};
 use serde::Deserialize;

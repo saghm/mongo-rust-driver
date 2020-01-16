@@ -245,7 +245,7 @@ impl ServerDescription {
         Ok(me)
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn min_wire_version(&self) -> Result<Option<i32>> {
         let me = self
             .reply
@@ -256,7 +256,7 @@ impl ServerDescription {
         Ok(me)
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn max_wire_version(&self) -> Result<Option<i32>> {
         let me = self
             .reply

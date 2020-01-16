@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Bson, Document};
 use serde::Deserialize;
@@ -24,7 +24,7 @@ pub(crate) struct Update {
 }
 
 impl Update {
-    #[cfg(test)]
+    // #[cfg(test)]
     fn empty() -> Self {
         Update::new(
             Namespace {

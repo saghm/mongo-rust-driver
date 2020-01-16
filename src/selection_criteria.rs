@@ -48,7 +48,7 @@ impl SelectionCriteria {
         }
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn as_predicate(&self) -> Option<&Predicate> {
         match self {
             Self::Predicate(ref p) => Some(p),

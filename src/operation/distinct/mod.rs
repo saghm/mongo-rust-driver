@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Bson, Document};
 use serde::Deserialize;
@@ -34,7 +34,7 @@ impl Distinct {
         }
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Distinct {
             ns: Namespace {

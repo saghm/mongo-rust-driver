@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Document};
 use serde::Deserialize;
@@ -22,7 +22,7 @@ impl Count {
         Count { ns, options }
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Count {
             ns: Namespace {

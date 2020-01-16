@@ -591,7 +591,7 @@ pub struct Namespace {
 }
 
 impl Namespace {
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn empty() -> Self {
         Self {
             db: String::new(),

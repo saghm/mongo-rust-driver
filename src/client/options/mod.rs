@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use std::{
     collections::HashSet,
@@ -136,7 +136,7 @@ impl StreamAddress {
         })
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn into_document(mut self) -> Document {
         let mut doc = Document::new();
 

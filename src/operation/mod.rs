@@ -160,7 +160,7 @@ struct CursorInfo {
     first_batch: VecDeque<Document>,
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 mod test {
     use std::sync::Arc;
 

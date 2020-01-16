@@ -29,7 +29,7 @@ impl StreamDescription {
     }
 
     /// Gets a description of a stream for a 4.2 connection.
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn new_testing() -> Self {
         Self {
             server_type: Default::default(),

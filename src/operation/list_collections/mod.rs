@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc, Document};
 
@@ -20,7 +20,7 @@ pub(crate) struct ListCollections {
 }
 
 impl ListCollections {
-    #[cfg(test)]
+    // #[cfg(test)]
     fn empty() -> Self {
         Self::new(String::new(), None, false, None)
     }

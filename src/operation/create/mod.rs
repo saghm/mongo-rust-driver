@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use bson::{bson, doc};
 
@@ -18,7 +18,7 @@ pub(crate) struct Create {
 }
 
 impl Create {
-    #[cfg(test)]
+    // #[cfg(test)]
     fn empty() -> Self {
         Self::new(
             Namespace {

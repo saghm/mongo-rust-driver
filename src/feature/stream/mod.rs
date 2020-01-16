@@ -159,14 +159,6 @@ impl AsyncStream {
         })
     }
 
-    pub(crate) fn bytes_read(&self) -> usize {
-        self.bytes_read
-    }
-
-    pub(crate) fn reset_bytes_read(&mut self) {
-        self.bytes_read = 0;
-    }
-
     pub(crate) async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let count = match self.inner {
             #[cfg(feature = "tokio-runtime")]
@@ -205,7 +197,6 @@ impl AsyncStream {
             }
         };
 
-        self.bytes_read += count;
         Ok(count)
     }
 
@@ -257,7 +248,7 @@ impl AsyncRead for AsyncStream {
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<tokio::io::Result<usize>> {
-        match self.deref_mut().inner {
+        let result = match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
             AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
 
@@ -280,7 +271,13 @@ impl AsyncRead for AsyncStream {
 
             #[cfg(feature = "custom-runtime")]
             AsyncStreamInner::Custom(ref mut stream) => stream.as_mut().poll_read(cx, buf),
+        };
+
+        if let Poll::Ready(Ok(count)) = result {
+            self.bytes_read += count;
         }
+
+        result
     }
 }
 
@@ -343,7 +340,10 @@ impl AsyncWrite for AsyncStream {
         }
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<tokio::io::Result<()>> {
         match self.deref_mut().inner {
             #[cfg(feature = "tokio-runtime")]
             AsyncStreamInner::Tokio(ref mut stream) => Pin::new(stream).poll_shutdown(cx),

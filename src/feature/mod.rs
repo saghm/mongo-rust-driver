@@ -17,6 +17,28 @@ pub use stream::connect::{AsyncReadWrite, Connect};
 #[cfg(feature = "custom-runtime")]
 pub use tokio::io::{AsyncRead, AsyncWrite};
 
+#[cfg(test)]
+#[macro_export]
+macro_rules! define_test {
+    ($name:ident, $body:block) => {
+        paste::item! {
+            #[cfg(feature = "tokio-runtime")]
+            #[tokio::test]
+            async fn [<$name _tokio>]() {
+                $body
+            }
+        }
+
+        paste::item! {
+            #[cfg(all(not(feature = "tokio-runtime"), feature = "async-std-runtime"))]
+            #[async_std::test]
+            async fn [<$name _async_std>]() {
+                $body
+            }
+        }
+    };
+}
+
 #[cfg(feature = "custom-runtime")]
 #[derive(Clone)]
 pub struct CustomAsyncRuntime {
@@ -66,6 +88,22 @@ impl Default for AsyncRuntime {
 }
 
 impl AsyncRuntime {
+    #[cfg(test)]
+    pub(crate) fn block_on<F, T>(&self, fut: F) -> T
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        use tokio::sync::oneshot;
+
+        let (sender, receiver) = oneshot::channel();
+        self.execute(async move {
+            let _ = sender.send(fut.await);
+        });
+
+        futures::executor::block_on(async move { receiver.await.unwrap() })
+    }
+
     pub(crate) fn execute<F>(&self, fut: F)
     where
         F: Future<Output = ()> + Send + 'static,

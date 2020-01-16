@@ -1,8 +1,5 @@
-use std::pin::Pin;
-
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 use crate::{
+    bson_util::{async_decode, async_encode},
     error::{ErrorKind, Result},
     feature::AsyncStream,
 };
@@ -44,25 +41,21 @@ impl Header {
 
     /// Serializes the Header and writes the bytes to `w`.
     pub(crate) async fn write_to(&self, stream: &mut AsyncStream) -> Result<()> {
-        let mut stream = Pin::new(stream);
-
-        stream.write_i32(self.length).await?;
-        stream.write_i32(self.request_id).await?;
-        stream.write_i32(self.response_to).await?;
-        stream.write_i32(self.op_code as i32).await?;
+        async_encode::write_i32(stream, self.length).await?;
+        async_encode::write_i32(stream, self.request_id).await?;
+        async_encode::write_i32(stream, self.response_to).await?;
+        async_encode::write_i32(stream, self.op_code as i32).await?;
 
         Ok(())
     }
 
     /// Reads bytes from `r` and deserializes them into a header.
     pub(crate) async fn read_from(stream: &mut AsyncStream) -> Result<Self> {
-        let mut stream = Pin::new(stream);
-
         Ok(Self {
-            length: stream.read_i32().await?,
-            request_id: stream.read_i32().await?,
-            response_to: stream.read_i32().await?,
-            op_code: OpCode::from_i32(stream.read_i32().await?)?,
+            length: async_decode::read_i32(stream).await?,
+            request_id: async_decode::read_i32(stream).await?,
+            response_to: async_decode::read_i32(stream).await?,
+            op_code: OpCode::from_i32(async_decode::read_i32(stream).await?)?,
         })
     }
 }

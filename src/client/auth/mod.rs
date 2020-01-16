@@ -2,8 +2,8 @@
 //! [`Client`](struct.Client.html).
 
 mod scram;
-#[cfg(test)]
-mod test;
+// #[cfg(test)]
+// mod test;
 
 use std::{borrow::Cow, str::FromStr};
 
@@ -204,7 +204,7 @@ pub struct Credential {
 }
 
 impl Credential {
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn into_document(mut self) -> Document {
         use bson::Bson;
 
