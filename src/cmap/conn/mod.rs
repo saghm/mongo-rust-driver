@@ -3,14 +3,16 @@ mod stream;
 mod stream_description;
 mod wire;
 
-use std::time::{Duration, Instant};
+use std::{time::{Duration, Instant}, sync::{Arc, Weak}};
 
 use derivative::Derivative;
 
+use super::{ConnectionPoolInner, ConnectionPool};
 use self::wire::Message;
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
+        CmapEventHandler,
         ConnectionCheckedInEvent,
         ConnectionCheckedOutEvent,
         ConnectionClosedEvent,
@@ -54,6 +56,11 @@ pub(crate) struct Connection {
 
     #[derivative(Debug = "ignore")]
     stream: AsyncStream,
+
+    pool: Option<Weak<ConnectionPoolInner>>,
+
+    #[derivative(Debug = "ignore")]
+    handler: Option<Arc<dyn CmapEventHandler>>,
 }
 
 impl Connection {
@@ -64,6 +71,7 @@ impl Connection {
         generation: u32,
         connect_timeout: Option<Duration>,
         tls_options: Option<TlsOptions>,
+        handler: Option<Arc<dyn CmapEventHandler>>,
         runtime: AsyncRuntime,
     ) -> Result<Self> {
         let options = StreamOptions {
@@ -74,14 +82,29 @@ impl Connection {
 
         let conn = Self {
             id,
+            pool: None,
             generation,
             stream_description: None,
             ready_and_available_time: None,
             stream: runtime.connect_stream(options).await?,
             address,
+            handler,
         };
 
         Ok(conn)
+    }
+
+    fn null() -> Self {
+        Self {
+            id: 0,
+            pool: None,
+            generation: 0,
+            stream_description: None,
+            ready_and_available_time: None,
+            stream: AsyncStream::Null,
+            address: StreamAddress { hostname: String::new(), port: None },
+            handler: None,
+        }
     }
 
     pub(crate) fn info(&self) -> ConnectionInfo {
@@ -190,5 +213,31 @@ impl Connection {
             }
             .into()
         })
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // If the connection has a weak reference to a pool, that means that the connection is being
+        // dropped when it's checked out. If the pool is still alive, it should check itself back
+        // in. Otherwise, the connection should close itself and emit a ConnectionClosed event
+        // (because the `close` helper was not called explicitly).
+        //
+        // If the connection does not have a weak reference to a pool, then the connection is being
+        // dropped while it's not checked out. This means that the pool called the close helper
+        // explicitly, so we don't add it back to the pool or emit any events.
+        if let Some(ref weak_pool_ref) = self.pool {
+            if let Some(strong_pool_ref) = weak_pool_ref.upgrade() {
+                let conn = std::mem::replace(self, Self::null());
+                
+                strong_pool_ref.clone().runtime.execute(async move {
+                    ConnectionPool { inner: strong_pool_ref }.check_in(conn).await;
+                });
+            } else if let Some(ref handler) = self.handler {
+                handler.handle_connection_closed_event(
+                    self.closed_event(ConnectionClosedReason::PoolClosed),
+                );
+            }
+        }
     }
 }

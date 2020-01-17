@@ -16,6 +16,8 @@ use crate::{cmap::conn::StreamOptions, error::Result};
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) enum AsyncStream{
+    Null,
+    
     #[cfg(feature = "tokio-runtime")]
     Tokio(tokio::net::TcpStream),
 
@@ -35,29 +37,21 @@ pub(crate) enum AsyncStream{
 #[cfg(feature = "tokio-runtime")]
 impl From<tokio::net::TcpStream> for AsyncStream {
     fn from(stream: tokio::net::TcpStream) -> Self {
-        Self {
-            inner: AsyncStream::Tokio(stream),
-        }
+        Self::Tokio(stream)
     }
 }
 
 #[cfg(feature = "async-std-runtime")]
 impl From<async_std::net::TcpStream> for AsyncStream {
     fn from(stream: async_std::net::TcpStream) -> Self {
-        Self {
-            inner: AsyncStream::AsyncStd(stream),
-            bytes_read: 0,
-        }
+        Self::AsyncStd(stream)
     }
 }
 
 #[cfg(feature = "custom-runtime")]
 impl From<Box<dyn connect::AsyncReadWrite>> for AsyncStream {
     fn from(stream: Box<dyn connect::AsyncReadWrite>) -> Self {
-        Self {
-            inner: AsyncStream::Custom(stream.into()),
-            bytes_read: 0,
-        }
+        Self ::Custom(stream.into())
     }
 }
 
@@ -88,7 +82,7 @@ impl AsyncStream {
 
         inner.set_nodelay(true)?;
 
-        let inner = match options.tls_options {
+        match options.tls_options {
             Some(cfg) => {
                 let name = DNSNameRef::try_from_ascii_str(&options.address.hostname)?;
                 let mut tls_config = cfg.into_rustls_config()?;
@@ -98,14 +92,10 @@ impl AsyncStream {
                     .connect(name, inner)
                     .await?;
 
-                AsyncStream::TokioTls(session)
+                Ok(Self::TokioTls(session))
             }
-            None => AsyncStream::Tokio(inner),
-        };
-
-        Ok(Self {
-            inner,
-        })
+            None => Ok(Self::Tokio(inner)),
+        }
     }
 
     #[cfg(feature = "async-std-runtime")]
@@ -132,7 +122,7 @@ impl AsyncStream {
 
         inner.set_nodelay(true)?;
 
-        let inner = match options.tls_options {
+        match options.tls_options {
             Some(cfg) => {
                 let mut tls_config = cfg.into_rustls_config()?;
                 tls_config.enable_sni = true;
@@ -141,18 +131,16 @@ impl AsyncStream {
                     .connect(options.address.hostname, inner)?
                     .await?;
 
-                AsyncStream::AsyncStdTls(session)
+                Ok(Self::AsyncStdTls(session))
             }
-            None => AsyncStream::AsyncStd(inner),
-        };
-
-        Ok(Self {
-            inner,
-        })
+            None => Ok(Self::AsyncStd(inner)),
+        }
     }
 
     pub(crate) async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let count = match self.inner {
+        let count = match self {
+            Self::Null => return Ok(0),
+            
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => {
                 use tokio::io::AsyncReadExt;
@@ -193,7 +181,9 @@ impl AsyncStream {
     }
 
     pub(crate) async fn write(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let count = match self.inner {
+        let count = match self {
+            Self::Null => return Ok(0),
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => {
                 use tokio::io::AsyncWriteExt;
@@ -240,7 +230,9 @@ impl AsyncRead for AsyncStream {
         cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<tokio::io::Result<usize>> {
-        let result = match self.deref_mut().inner {
+        let result = match self.deref_mut() {
+            Self::Null => return Poll::Ready(Ok(0)),
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
 
@@ -275,7 +267,9 @@ impl AsyncWrite for AsyncStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<tokio::io::Result<usize>> {
-        match self.deref_mut().inner {
+        match self.deref_mut() {
+            Self::Null => return Poll::Ready(Ok(0)),
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
 
@@ -302,7 +296,9 @@ impl AsyncWrite for AsyncStream {
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        match self.deref_mut().inner {
+        match self.deref_mut() {
+            Self::Null => return Poll::Ready(Ok(())),
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => Pin::new(stream).poll_flush(cx),
 
@@ -332,7 +328,9 @@ impl AsyncWrite for AsyncStream {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<tokio::io::Result<()>> {
-        match self.deref_mut().inner {
+        match self.deref_mut() {
+            Self::Null => return Poll::Ready(Ok(())),
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
 

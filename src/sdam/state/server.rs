@@ -53,6 +53,7 @@ impl Server {
                 0,
                 options.connect_timeout,
                 options.tls_options(),
+                None,
                 options.async_runtime.clone(),
             )
             .await?,
