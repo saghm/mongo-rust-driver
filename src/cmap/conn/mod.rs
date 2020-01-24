@@ -3,12 +3,15 @@ mod stream;
 mod stream_description;
 mod wire;
 
-use std::{time::{Duration, Instant}, sync::{Arc, Weak}};
+use std::{
+    sync::{Arc, Weak},
+    time::{Duration, Instant},
+};
 
 use derivative::Derivative;
 
-use super::{ConnectionPoolInner, ConnectionPool};
 use self::wire::Message;
+use super::{ConnectionPool, ConnectionPoolInner};
 use crate::{
     error::{ErrorKind, Result},
     event::cmap::{
@@ -57,7 +60,7 @@ pub(crate) struct Connection {
     #[derivative(Debug = "ignore")]
     stream: AsyncStream,
 
-    pool: Option<Weak<ConnectionPoolInner>>,
+    pub(super) pool: Option<Weak<ConnectionPoolInner>>,
 
     #[derivative(Debug = "ignore")]
     handler: Option<Arc<dyn CmapEventHandler>>,
@@ -102,7 +105,10 @@ impl Connection {
             stream_description: None,
             ready_and_available_time: None,
             stream: AsyncStream::Null,
-            address: StreamAddress { hostname: String::new(), port: None },
+            address: StreamAddress {
+                hostname: String::new(),
+                port: None,
+            },
             handler: None,
         }
     }
@@ -229,9 +235,13 @@ impl Drop for Connection {
         if let Some(ref weak_pool_ref) = self.pool {
             if let Some(strong_pool_ref) = weak_pool_ref.upgrade() {
                 let conn = std::mem::replace(self, Self::null());
-                
+
                 strong_pool_ref.clone().runtime.execute(async move {
-                    ConnectionPool { inner: strong_pool_ref }.check_in(conn).await;
+                    ConnectionPool {
+                        inner: strong_pool_ref,
+                    }
+                    .check_in(conn)
+                    .await;
                 });
             } else if let Some(ref handler) = self.handler {
                 handler.handle_connection_closed_event(

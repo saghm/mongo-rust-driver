@@ -21,21 +21,28 @@ pub(super) async fn perform_checks(pool: &ConnectionPool) -> bool {
 
 /// Iterate over the connections and remove any that are stale or idle.
 async fn remove_perished_connections_from_pool(pool: &ConnectionPool) -> bool {
-    let mut state = pool.state.write().await;
+    let mut connections = pool.inner.connections.write().await;
 
-    if state.closed {
+    if pool.inner.closed.load(Ordering::SeqCst) {
         return true;
     }
 
     let mut i = 0;
 
-    while i < state.connections.len() {
-        if state.connections[i].is_stale(pool.generation.load(Ordering::SeqCst)) {
-            pool.close_connection(state.connections.remove(i), ConnectionClosedReason::Stale);
-        } else if state.connections[i].is_idle(pool.max_idle_time) {
-            pool.close_connection(state.connections.remove(i), ConnectionClosedReason::Idle);
+    while i < connections.len() {
+        let reason = if connections[i].is_stale(pool.generation.load(Ordering::SeqCst)) {
+            ConnectionClosedReason::Stale
+        } else if connections[i].is_idle(pool.max_idle_time) {
+            ConnectionClosedReason::Idle
         } else {
             i += 1;
+            continue;
+        };
+
+        // We know this will always find the connection since we hold a lock, but we avoid using
+        // unwrap out of principle.
+        if let Some(connection) = connections.remove(i) {
+            pool.close_connection(connection, reason);
         }
     }
 
@@ -48,15 +55,15 @@ async fn remove_perished_connections_from_pool(pool: &ConnectionPool) -> bool {
 async fn ensure_min_connections_in_pool(pool: &ConnectionPool) -> bool {
     if let Some(min_pool_size) = pool.min_pool_size {
         loop {
-            let mut state = pool.state.write().await;
+            let mut connections = pool.inner.connections.write().await;
 
-            if state.closed {
+            if pool.inner.closed.load(Ordering::SeqCst) {
                 return true;
             }
 
             if pool.total_connection_count.load(Ordering::SeqCst) < min_pool_size {
                 match pool.create_connection(false).await {
-                    Ok(connection) => state.connections.push(connection),
+                    Ok(connection) => connections.push_back(connection),
                     e @ Err(_) => {
                         // Since we had to clear the pool, we return early from this function and
                         // put the background thread back to sleep. Next time it wakes up, the

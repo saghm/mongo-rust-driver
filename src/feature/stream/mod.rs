@@ -15,9 +15,9 @@ use crate::{cmap::conn::StreamOptions, error::Result};
 #[cfg(any(feature = "tokio-runtime", feature = "async-std-runtime"))]
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub(crate) enum AsyncStream{
+pub(crate) enum AsyncStream {
     Null,
-    
+
     #[cfg(feature = "tokio-runtime")]
     Tokio(tokio::net::TcpStream),
 
@@ -51,7 +51,7 @@ impl From<async_std::net::TcpStream> for AsyncStream {
 #[cfg(feature = "custom-runtime")]
 impl From<Box<dyn connect::AsyncReadWrite>> for AsyncStream {
     fn from(stream: Box<dyn connect::AsyncReadWrite>) -> Self {
-        Self ::Custom(stream.into())
+        Self::Custom(stream.into())
     }
 }
 
@@ -140,7 +140,7 @@ impl AsyncStream {
     pub(crate) async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let count = match self {
             Self::Null => return Ok(0),
-            
+
             #[cfg(feature = "tokio-runtime")]
             AsyncStream::Tokio(ref mut stream) => {
                 use tokio::io::AsyncReadExt;

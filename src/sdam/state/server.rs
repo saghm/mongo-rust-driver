@@ -71,10 +71,6 @@ impl Server {
         })
     }
 
-    pub(crate) fn close(&self) {
-        self.pool.close()
-    }
-
     /// Creates a new Server given the `address` and `options`.
     /// Checks out a connection from the server's pool.
     pub(crate) async fn checkout_connection(&self) -> Result<Connection> {

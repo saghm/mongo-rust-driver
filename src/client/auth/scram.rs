@@ -631,7 +631,7 @@ impl ServerFinal {
     }
 }
 
-// #[cfg(test)]
+#[cfg(test)]
 mod tests {
     use bson::Bson;
 

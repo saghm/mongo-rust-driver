@@ -180,12 +180,5 @@ pub(crate) async fn update_topology(
     // the info over.
     let mut topology_lock = topology.write().await;
     topology_lock.description = topology_clone.description;
-
-    for (address, server) in topology_lock.servers.drain() {
-        if !topology_clone.servers.contains_key(&address) {
-            server.close();
-        }
-    }
-
     topology_lock.servers = topology_clone.servers;
 }

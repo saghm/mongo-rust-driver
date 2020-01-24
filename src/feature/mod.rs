@@ -6,7 +6,10 @@ use std::future::Future;
 use derivative::Derivative;
 
 pub(crate) use self::stream::AsyncStream;
-use crate::{cmap::conn::StreamOptions, error::Result};
+use crate::{
+    cmap::conn::StreamOptions,
+    error::{ErrorKind, Result},
+};
 
 #[cfg(feature = "custom-runtime")]
 pub use executor::Execute;
@@ -49,6 +52,8 @@ pub struct CustomAsyncRuntime {
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub enum AsyncRuntime {
+    Null,
+
     #[cfg(feature = "tokio-runtime")]
     Tokio,
 
@@ -109,6 +114,8 @@ impl AsyncRuntime {
         F: Future<Output = ()> + Send + 'static,
     {
         match self {
+            Self::Null => {}
+
             #[cfg(feature = "tokio-runtime")]
             Self::Tokio => {
                 tokio::task::spawn(fut);
@@ -128,6 +135,11 @@ impl AsyncRuntime {
 
     pub(crate) async fn connect_stream(&self, options: StreamOptions) -> Result<AsyncStream> {
         match self {
+            Self::Null => Err(ErrorKind::ConfigurationError {
+                message: "null runtime".into(),
+            }
+            .into()),
+
             #[cfg(feature = "tokio-runtime")]
             Self::Tokio => AsyncStream::connect_tokio(options).await,
 

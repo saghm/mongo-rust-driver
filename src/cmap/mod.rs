@@ -8,8 +8,9 @@ pub(crate) mod options;
 mod wait_queue;
 
 use std::{
+    collections::VecDeque,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -60,17 +61,9 @@ impl std::ops::Deref for ConnectionPool {
     }
 }
 
-#[derive(Debug)]
-struct PoolState {
-    closed: bool,
-    connections: Vec<Connection>,
-}
-
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct ConnectionPoolInner {
-    closed: RwLock<bool>,
-
     /// The address the pool's connections will connect to.
     address: StreamAddress,
 
@@ -82,12 +75,14 @@ pub(crate) struct ConnectionPoolInner {
     /// server.
     connect_timeout: Option<Duration>,
 
+    closed: AtomicBool,
+
     /// The credential to use for authenticating connections in this pool.
     credential: Option<Credential>,
 
     /// Contains the logic for "establishing" a connection. This includes handshaking and
     /// authenticating a connection when it's first created.
-    establisher: ConnectionEstablisher,
+    establisher: Option<ConnectionEstablisher>,
 
     /// The event handler specified by the user to process CMAP events.
     #[derivative(Debug = "ignore")]
@@ -119,7 +114,7 @@ pub(crate) struct ConnectionPoolInner {
 
     runtime: AsyncRuntime,
 
-    state: RwLock<PoolState>,
+    connections: RwLock<VecDeque<Connection>>,
 
     /// If a checkout operation takes longer than `wait_queue_timeout`, the pool will return an
     /// error. If `wait_queue_timeout` is `None`, then the checkout operation will not time out.
@@ -144,8 +139,8 @@ impl ConnectionPool {
         // Get the individual options from `options`.
         let connect_timeout = options.as_ref().and_then(|opts| opts.connect_timeout);
         let credential = options.as_mut().and_then(|opts| opts.credential.clone());
-        let establisher = ConnectionEstablisher::new(options.as_ref());
         let event_handler = options.as_mut().and_then(|opts| opts.event_handler.take());
+        let establisher = Some(ConnectionEstablisher::new(options.as_ref()));
 
         // The CMAP spec indicates that a max idle time of zero means that connections should not be
         // closed due to idleness.
@@ -166,13 +161,8 @@ impl ConnectionPool {
         let tls_options = options.as_mut().and_then(|opts| opts.tls_options.take());
         let wait_queue_timeout = options.as_ref().and_then(|opts| opts.wait_queue_timeout);
 
-        let state = PoolState {
-            closed: false,
-            connections: Default::default(),
-        };
-
         let inner = ConnectionPoolInner {
-            closed: RwLock::new(false),
+            closed: false.into(),
             wait_queue: WaitQueue::new(runtime.clone(), address.clone(), wait_queue_timeout),
             address: address.clone(),
             connect_timeout,
@@ -185,7 +175,7 @@ impl ConnectionPool {
             min_pool_size,
             next_connection_id: AtomicU32::new(1),
             runtime,
-            state: RwLock::new(state),
+            connections: RwLock::new(Default::default()),
             tls_options,
             total_connection_count: AtomicU32::new(0),
             wait_queue_timeout,
@@ -224,9 +214,7 @@ impl ConnectionPool {
     where
         F: FnOnce(&Arc<dyn CmapEventHandler>),
     {
-        if let Some(ref handler) = self.event_handler {
-            emit(handler);
-        }
+        self.inner.emit_event(emit)
     }
 
     /// Checks out a connection from the pool. This method will block until this thread is at the
@@ -243,12 +231,15 @@ impl ConnectionPool {
         });
 
         let start_time = Instant::now();
-        let mut handle = self.wait_queue.wait_until_at_front().await?;
+       let result = {
+           // Drop the handle to allow the next task in the wait queue to proceed once we've obtained
+           // the connection rather than waiting for the error checking and the event emitting.
+             let mut handle = self.wait_queue.wait_until_at_front().await?;
 
-        let result = self
-            .acquire_or_create_connection(start_time, &mut handle)
-            .await;
-        handle.exit_queue();
+            self
+                .acquire_or_create_connection(start_time, &mut handle)
+                .await
+        };
 
         let mut conn = match result {
             Ok(conn) => conn,
@@ -285,9 +276,9 @@ impl ConnectionPool {
         handle: &mut WaitQueueHandle,
     ) -> Result<Connection> {
         loop {
-            let mut state = self.state.write().await;
+            let mut connections = self.inner.connections.write().await;
 
-            if state.closed {
+            if self.inner.closed.load(Ordering::SeqCst) {
                 return Err(ErrorKind::PoolClosedError {
                     address: self.address.clone(),
                 }
@@ -295,7 +286,7 @@ impl ConnectionPool {
             }
 
             // Try to get the most recent available connection.
-            while let Some(conn) = state.connections.pop() {
+            while let Some(conn) = connections.pop_back() {
                 // Close the connection if it's stale.
                 if conn.is_stale(self.generation.load(Ordering::SeqCst)) {
                     self.close_connection(conn, ConnectionClosedReason::Stale);
@@ -363,10 +354,10 @@ impl ConnectionPool {
         let pool = self.clone();
         let wait_queue = self.wait_queue.clone();
 
-        self.runtime.execute(async move {
-            let mut state = pool.state.write().await;
+        self.inner.runtime.execute(async move {
+            let mut connections = pool.inner.connections.write().await;
 
-            if state.closed {
+            if pool.inner.closed.load(Ordering::SeqCst) {
                 pool.close_connection(conn, ConnectionClosedReason::PoolClosed);
             } else {
                 conn.mark_checked_in();
@@ -378,7 +369,7 @@ impl ConnectionPool {
                     return;
                 }
 
-                state.connections.push(conn);
+                connections.push_back(conn);
 
                 wait_queue.notify_ready();
             }
@@ -429,49 +420,106 @@ impl ConnectionPool {
             handler.handle_connection_created_event(connection.created_event())
         });
 
-        let establish_result = self
-            .establisher
-            .establish_connection(&mut connection, self.credential.as_ref())
-            .await;
+        if let Some(ref establisher) = self.establisher {
+            let establish_result = establisher
+                .establish_connection(&mut connection, self.credential.as_ref())
+                .await;
 
-        if let Err(e) = establish_result {
-            self.clear();
+            if let Err(e) = establish_result {
+                self.clear();
 
-            if checking_out {
-                self.emit_event(|handler| {
-                    handler.handle_connection_checkout_failed_event(ConnectionCheckoutFailedEvent {
-                        address: self.address.clone(),
-                        reason: ConnectionCheckoutFailedReason::ConnectionError,
-                    })
-                });
+                if checking_out {
+                    self.emit_event(|handler| {
+                        handler.handle_connection_checkout_failed_event(
+                            ConnectionCheckoutFailedEvent {
+                                address: self.address.clone(),
+                                reason: ConnectionCheckoutFailedReason::ConnectionError,
+                            },
+                        )
+                    });
+                }
+
+                return Err(e);
             }
-
-            return Err(e);
         }
 
         self.emit_event(|handler| handler.handle_connection_ready_event(connection.ready_event()));
 
         Ok(connection)
     }
+}
 
-    pub(crate) fn close(&self) {
-        let pool = self.clone();
+impl ConnectionPoolInner {
+    /// Emits an event from the event handler if one is present, where `emit` is a closure that uses
+    /// the event handler.
+    fn emit_event<F>(&self, emit: F)
+    where
+        F: FnOnce(&Arc<dyn CmapEventHandler>),
+    {
+        if let Some(ref handler) = self.event_handler {
+            emit(handler);
+        }
+    }
 
-        self.runtime.execute(async move {
-            let mut state = pool.state.write().await;
-            state.closed = true;
+    fn null() -> Self {
+        ConnectionPoolInner {
+            closed: true.into(),
+            wait_queue: WaitQueue::new(
+                AsyncRuntime::Null,
+                StreamAddress {
+                    hostname: String::new(),
+                    port: None,
+                },
+                None,
+            ),
+            address: StreamAddress {
+                hostname: String::new(),
+                port: None,
+            },
+            connect_timeout: None,
+            credential: None,
+            establisher: None,
+            event_handler: None,
+            generation: AtomicU32::new(0),
+            max_idle_time: None,
+            max_pool_size: 0,
+            min_pool_size: None,
+            next_connection_id: AtomicU32::new(0),
+            runtime: AsyncRuntime::Null,
+            connections: RwLock::new(Default::default()),
+            tls_options: None,
+            total_connection_count: AtomicU32::new(0),
+            wait_queue_timeout: None,
+        }
+    }
+}
 
-            for conn in state.connections.drain(..) {
-                pool.emit_event(|handler| {
+impl Drop for ConnectionPoolInner {
+    /// Automatic cleanup for the connection pool. This is defined on `ConnectionPoolInner` rather
+    /// than `ConnectionPool` so that it only gets run once all (non-weak) references to the
+    /// `ConnectionPoolInner` are dropped.
+    fn drop(&mut self) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let inner = std::mem::replace(self, Self::null());
+        let runtime = self.runtime.clone();
+
+        runtime.execute(async move {
+            for mut conn in inner.connections.write().await.drain(..) {
+                conn.pool.take();
+
+                inner.emit_event(|handler| {
                     handler.handle_connection_closed_event(
                         conn.closed_event(ConnectionClosedReason::PoolClosed),
                     );
                 });
             }
 
-            pool.emit_event(|handler| {
+            inner.emit_event(|handler| {
                 handler.handle_pool_closed_event(PoolClosedEvent {
-                    address: pool.address.clone(),
+                    address: inner.address.clone(),
                 });
             });
         });

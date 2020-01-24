@@ -53,8 +53,8 @@ impl WaitQueue {
         queue.push_back(sender);
 
         let mut handle = WaitQueueHandle {
-            receiver,
-            queue: self.queue.clone(),
+            receiver: Some(receiver),
+            queue: Some(self.queue.clone()),
             runtime: self.runtime.clone(),
             address: self.address.clone(),
         };
@@ -81,18 +81,40 @@ impl WaitQueue {
 #[derive(Debug)]
 pub(super) struct WaitQueueHandle {
     address: StreamAddress,
-    receiver: Receiver<()>,
-    queue: Arc<Mutex<VecDeque<Sender<()>>>>,
+    receiver: Option<Receiver<()>>,
+    queue: Option<Arc<Mutex<VecDeque<Sender<()>>>>>,
     runtime: AsyncRuntime,
 }
 
 impl WaitQueueHandle {
+    fn null() -> Self {
+        Self {
+            address: StreamAddress {
+                hostname: "".into(),
+                port: None,
+            },
+            receiver: None,
+            queue: None,
+            runtime: AsyncRuntime::Null,
+        }
+    }
+
     pub(super) async fn wait_for_available_connection(
         &mut self,
         timeout: Option<Duration>,
     ) -> Result<()> {
+        let receiver = match self.receiver {
+            Some(ref mut receiver) => receiver,
+            None => {
+                return Err(ErrorKind::Invariant {
+                    message: "attempted to wait on a null WaitQueueHandle".into(),
+                }
+                .into())
+            }
+        };
+
         if let Some(timeout) = timeout {
-            match futures::future::select(self.receiver.recv().boxed(), Delay::new(timeout).boxed())
+            match futures::future::select(receiver.recv().boxed(), Delay::new(timeout).boxed())
                 .await
             {
                 Either::Left(..) => Ok(()),
@@ -102,21 +124,26 @@ impl WaitQueueHandle {
                 .into()),
             }
         } else {
-            self.receiver.recv().await;
+            receiver.recv().await;
             Ok(())
         }
     }
+}
 
-    pub(super) fn exit_queue(self) {
-        let queue = self.queue.clone();
+impl Drop for WaitQueueHandle {
+    fn drop(&mut self) {
+        if let Some(queue) = self.queue.clone() {
+            let mut queue = queue.clone().lock().await;
+            let handle = std::mem::replace(self, Self::null());
+            let runtime = self.runtime.clone();
 
-        self.runtime.execute(async move {
-            let mut queue = queue.lock().await;
-            queue.pop_front();
+            runtime.execute(async move {
+                queue.pop_front();
 
-            if let Some(sender) = queue.front_mut() {
-                let _ = sender.send(()).await;
-            }
-        });
+                if let Some(sender) = queue.front_mut() {
+                    let _ = sender.send(()).await;
+                }
+            });
+        }
     }
 }

@@ -126,6 +126,11 @@ pub enum ErrorKind {
     #[error(display = "Unable to parse hostname: {}", hostname)]
     InvalidHostname { hostname: String },
 
+    /// An invariant the driver expected to hold was violated. This will only be returned in the
+    /// event of a bug in the driver.
+    #[error(display = "{}", _0)]
+    Invariant { message: String },
+
     /// Wrapper around [`std::io::Error`](https://doc.rust-lang.org/std/io/struct.Error.html).
     #[error(display = "{}", _0)]
     Io(#[error(source)] std::io::Error),

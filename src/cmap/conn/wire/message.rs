@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use bson::Document;
-use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, AsyncRead};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{
     header::{Header, OpCode},
