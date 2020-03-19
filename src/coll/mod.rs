@@ -146,19 +146,19 @@ impl Collection {
     }
 
     /// Drops the collection, deleting all data, users, and indexes stored in it.
-    pub fn drop(&self, options: impl Into<Option<DropCollectionOptions>>) -> Result<()> {
+    pub async fn drop(&self, options: impl Into<Option<DropCollectionOptions>>) -> Result<()> {
         let mut options = options.into();
         resolve_options!(self, options, [write_concern]);
 
         let drop = DropCollection::new(self.namespace(), options);
-        self.client().execute_operation(&drop, None)
+        self.client().execute_operation(&drop, None).await
     }
 
     /// Runs an aggregation operation.
     ///
     /// See the documentation [here](https://docs.mongodb.com/manual/aggregation/) for more
     /// information on aggregations.
-    pub fn aggregate(
+    pub async fn aggregate(
         &self,
         pipeline: impl IntoIterator<Item = Document>,
         options: impl Into<Option<AggregateOptions>>,
@@ -174,11 +174,12 @@ impl Collection {
         let client = self.client();
         client
             .execute_operation(&aggregate, None)
+            .await
             .map(|spec| Cursor::new(client.clone(), spec))
     }
 
     /// Estimates the number of documents in the collection using collection metadata.
-    pub fn estimated_document_count(
+    pub async fn estimated_document_count(
         &self,
         options: impl Into<Option<EstimatedDocumentCountOptions>>,
     ) -> Result<i64> {
@@ -186,14 +187,14 @@ impl Collection {
         resolve_options!(self, options, [read_concern, selection_criteria]);
 
         let op = Count::new(self.namespace(), options);
-        self.client().execute_operation(&op, None)
+        self.client().execute_operation(&op, None).await
     }
 
     /// Gets the number of documents matching `filter`.
     ///
     /// Note that using [`Collection::estimated_document_count`](#method.estimated_document_count)
     /// is recommended instead of this method is most cases.
-    pub fn count_documents(
+    pub async fn count_documents(
         &self,
         filter: impl Into<Option<Document>>,
         options: impl Into<Option<CountOptions>>,
@@ -231,7 +232,7 @@ impl Collection {
                 .build()
         });
 
-        let result = match self.aggregate(pipeline, aggregate_options)?.next() {
+        let result = match self.aggregate(pipeline, aggregate_options).await?.next() {
             Some(doc) => doc?,
             None => return Ok(0),
         };
@@ -261,7 +262,7 @@ impl Collection {
     }
 
     /// Deletes all documents stored in the collection matching `query`.
-    pub fn delete_many(
+    pub async fn delete_many(
         &self,
         query: Document,
         options: impl Into<Option<DeleteOptions>>,
@@ -270,11 +271,11 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let delete = Delete::new(self.namespace(), query, None, options);
-        self.client().execute_operation(&delete, None)
+        self.client().execute_operation(&delete, None).await
     }
 
     /// Deletes up to one document found matching `query`.
-    pub fn delete_one(
+    pub async fn delete_one(
         &self,
         query: Document,
         options: impl Into<Option<DeleteOptions>>,
@@ -283,11 +284,11 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let delete = Delete::new(self.namespace(), query, Some(1), options);
-        self.client().execute_operation(&delete, None)
+        self.client().execute_operation(&delete, None).await
     }
 
     /// Finds the distinct values of the field specified by `field_name` across the collection.
-    pub fn distinct(
+    pub async fn distinct(
         &self,
         field_name: &str,
         filter: impl Into<Option<Document>>,
@@ -302,11 +303,11 @@ impl Collection {
             filter.into(),
             options,
         );
-        self.client().execute_operation(&op, None)
+        self.client().execute_operation(&op, None).await
     }
 
     /// Finds the documents in the collection matching `filter`.
-    pub fn find(
+    pub async fn find(
         &self,
         filter: impl Into<Option<Document>>,
         options: impl Into<Option<FindOptions>>,
@@ -315,11 +316,12 @@ impl Collection {
         let client = self.client();
         client
             .execute_operation(&find, None)
+            .await
             .map(|spec| Cursor::new(client.clone(), spec))
     }
 
     /// Finds a single document in the collection matching `filter`.
-    pub fn find_one(
+    pub async fn find_one(
         &self,
         filter: impl Into<Option<Document>>,
         options: impl Into<Option<FindOneOptions>>,
@@ -329,7 +331,7 @@ impl Collection {
             .map(Into::into)
             .unwrap_or_else(Default::default);
         options.limit = Some(-1);
-        let mut cursor = self.find(filter, Some(options))?;
+        let mut cursor = self.find(filter, Some(options)).await?;
         cursor.next().transpose()
     }
 
@@ -348,7 +350,7 @@ impl Collection {
 
     /// Atomically finds up to one document in the collection matching `filter` and replaces it with
     /// `replacement`.
-    pub fn find_one_and_replace(
+    pub async fn find_one_and_replace(
         &self,
         filter: Document,
         replacement: Document,
@@ -358,14 +360,14 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let op = FindAndModify::with_replace(self.namespace(), filter, replacement, options)?;
-        self.client().execute_operation(&op, None)
+        self.client().execute_operation(&op, None).await
     }
 
     /// Atomically finds up to one document in the collection matching `filter` and updates it.
     /// Both `Document` and `Vec<Document>` implement `Into<UpdateModifications>`, so either can be
     /// passed in place of constructing the enum case. Note: pipeline updates are only supported
     /// in MongoDB 4.2+.
-    pub fn find_one_and_update(
+    pub async fn find_one_and_update(
         &self,
         filter: Document,
         update: impl Into<UpdateModifications>,
@@ -376,11 +378,11 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let op = FindAndModify::with_update(self.namespace(), filter, update, options)?;
-        self.client().execute_operation(&op, None)
+        self.client().execute_operation(&op, None).await
     }
 
     /// Inserts the documents in `docs` into the collection.
-    pub fn insert_many(
+    pub async fn insert_many(
         &self,
         docs: impl IntoIterator<Item = Document>,
         options: impl Into<Option<InsertManyOptions>>,
@@ -414,7 +416,7 @@ impl Collection {
             n_attempted += current_batch_size;
 
             let insert = Insert::new(self.namespace(), current_batch, options.clone());
-            match self.client().execute_operation(&insert, None) {
+            match self.client().execute_operation(&insert, None).await {
                 Ok(result) => {
                     if cumulative_failure.is_none() {
                         let cumulative_result =
@@ -462,7 +464,7 @@ impl Collection {
     }
 
     /// Inserts `doc` into the collection.
-    pub fn insert_one(
+    pub async fn insert_one(
         &self,
         doc: Document,
         options: impl Into<Option<InsertOneOptions>>,
@@ -477,12 +479,13 @@ impl Collection {
         );
         self.client()
             .execute_operation(&insert, None)
+            .await
             .map(InsertOneResult::from_insert_many_result)
             .map_err(convert_bulk_errors)
     }
 
     /// Replaces up to one document matching `query` in the collection with `replacement`.
-    pub fn replace_one(
+    pub async fn replace_one(
         &self,
         query: Document,
         replacement: Document,
@@ -500,7 +503,7 @@ impl Collection {
             false,
             options.map(UpdateOptions::from_replace_options),
         );
-        self.client().execute_operation(&update, None)
+        self.client().execute_operation(&update, None).await
     }
 
     /// Updates all documents matching `query` in the collection.
@@ -509,7 +512,7 @@ impl Collection {
     /// passed in place of constructing the enum case. Note: pipeline updates are only supported
     /// in MongoDB 4.2+. See the official MongoDB
     /// [documentation](https://docs.mongodb.com/manual/reference/command/update/#behavior) for more information on specifying updates.
-    pub fn update_many(
+    pub async fn update_many(
         &self,
         query: Document,
         update: impl Into<UpdateModifications>,
@@ -525,7 +528,7 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let update = Update::new(self.namespace(), query, update, true, options);
-        self.client().execute_operation(&update, None)
+        self.client().execute_operation(&update, None).await
     }
 
     /// Updates up to one document matching `query` in the collection.
@@ -534,7 +537,7 @@ impl Collection {
     /// passed in place of constructing the enum case. Note: pipeline updates are only supported
     /// in MongoDB 4.2+. See the official MongoDB
     /// [documentation](https://docs.mongodb.com/manual/reference/command/update/#behavior) for more information on specifying updates.
-    pub fn update_one(
+    pub async fn update_one(
         &self,
         query: Document,
         update: impl Into<UpdateModifications>,
@@ -544,7 +547,7 @@ impl Collection {
         resolve_options!(self, options, [write_concern]);
 
         let update = Update::new(self.namespace(), query, update.into(), false, options);
-        self.client().execute_operation(&update, None)
+        self.client().execute_operation(&update, None).await
     }
 
     /// Creates the indexes specified by `models`.
