@@ -14,9 +14,13 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
 use crate::{
-    bson::{doc, spec::BinarySubtype, Binary, Bson, Document},
-    bson_util,
-    client::auth::{self, Credential},
+    bson::{doc, Bson, Document},
+    client::auth::{
+        self,
+        sasl::{SaslContinue, SaslResponse, SaslStart},
+        AuthMechanism,
+        Credential,
+    },
     cmap::{Command, Connection},
     error::{Error, Result},
 };
@@ -142,12 +146,8 @@ impl ScramVersion {
         // Normal SCRAM implementations would cease here. The following round trip is MongoDB
         // implementation specific and just consists of a client no-op followed by a server no-op
         // with "done: true".
-        let noop = doc! {
-            "saslContinue": 1,
-            "conversationId": server_final.conversation_id().clone(),
-            "payload": Bson::Binary(Binary { subtype: BinarySubtype::Generic, bytes: Vec::new() })
-        };
-        let command = Command::new("saslContinue".into(), source.into(), noop);
+        let noop = SaslContinue::new(server_final.conversation_id().clone(), Vec::new());
+        let command = Command::new("saslContinue".into(), source.into(), noop.into_command());
 
         let server_noop_response = conn.send_command(command, None).await?;
 
@@ -306,22 +306,6 @@ fn parse_kvp(str: &str, expected_key: char) -> Result<String> {
     }
 }
 
-fn validate_command_success(response: &Document) -> Result<()> {
-    let ok = response
-        .get("ok")
-        .ok_or_else(|| Error::invalid_authentication_response("SCRAM"))?;
-    match bson_util::get_int(ok) {
-        Some(1) => Ok(()),
-        Some(_) => Err(Error::authentication_error(
-            "SCRAM",
-            response
-                .get_str("errmsg")
-                .unwrap_or("Authentication failure"),
-        )),
-        _ => Err(Error::invalid_authentication_response("SCRAM")),
-    }
-}
-
 /// Model of the first message sent by the client.
 struct ClientFirst {
     message: String,
@@ -363,11 +347,11 @@ impl ClientFirst {
     }
 
     fn to_command(&self, scram: &ScramVersion) -> Document {
-        doc! {
-            "saslStart": 1,
-            "mechanism": scram.to_string(),
-            "payload": Bson::Binary(Binary { subtype: BinarySubtype::Generic, bytes: self.message().as_bytes().to_vec() })
-        }
+        let payload = self.message().as_bytes().to_vec();
+        let auth_mech = AuthMechanism::from_scram_version(scram);
+        let sasl_start = SaslStart::new(auth_mech, payload);
+
+        sasl_start.into_command()
     }
 }
 
@@ -385,19 +369,13 @@ struct ServerFirst {
 
 impl ServerFirst {
     fn parse(response: Document) -> Result<Self> {
-        validate_command_success(&response)?;
+        let SaslResponse {
+            conversation_id,
+            payload,
+            done,
+        } = SaslResponse::parse("SCRAM", response)?;
 
-        let conversation_id = response
-            .get("conversationId")
-            .ok_or_else(|| Error::authentication_error("SCRAM", "mismatched conversationId's"))?;
-        let payload = match response.get_binary_generic("payload") {
-            Ok(p) => p,
-            Err(_) => return Err(Error::invalid_authentication_response("SCRAM")),
-        };
-        let done = response
-            .get_bool("done")
-            .or_else(|_| Err(Error::invalid_authentication_response("SCRAM")))?;
-        let message = str::from_utf8(payload)
+        let message = str::from_utf8(&payload)
             .or_else(|_| Err(Error::invalid_authentication_response("SCRAM")))?;
 
         let parts: Vec<&str> = message.split(',').collect();
@@ -516,11 +494,8 @@ impl ClientFinal {
         })
     }
 
-    fn payload(&self) -> Bson {
-        Bson::Binary(Binary {
-            subtype: BinarySubtype::Generic,
-            bytes: self.message().as_bytes().to_vec(),
-        })
+    fn payload(&self) -> Vec<u8> {
+        self.message().as_bytes().to_vec()
     }
 
     fn message(&self) -> &str {
@@ -532,11 +507,8 @@ impl ClientFinal {
     }
 
     fn to_command(&self) -> Document {
-        doc! {
-            "saslContinue": 1,
-            "conversationId": self.conversation_id.clone(),
-            "payload": self.payload()
-        }
+        let sasl_continue = SaslContinue::new(self.conversation_id.clone(), self.payload());
+        sasl_continue.into_command()
     }
 }
 
@@ -556,18 +528,13 @@ struct ServerFinal {
 
 impl ServerFinal {
     fn parse(response: Document) -> Result<Self> {
-        validate_command_success(&response)?;
+        let SaslResponse {
+            conversation_id,
+            payload,
+            done,
+        } = SaslResponse::parse("SCRAM", response)?;
 
-        let conversation_id = response
-            .get("conversationId")
-            .ok_or_else(|| Error::invalid_authentication_response("SCRAM"))?;
-        let done = response
-            .get_bool("done")
-            .or_else(|_| Err(Error::invalid_authentication_response("SCRAM")))?;
-        let payload = response
-            .get_binary_generic("payload")
-            .or_else(|_| Err(Error::invalid_authentication_response("SCRAM")))?;
-        let message = str::from_utf8(payload)
+        let message = str::from_utf8(&payload)
             .or_else(|_| Err(Error::invalid_authentication_response("SCRAM")))?;
 
         let first = message

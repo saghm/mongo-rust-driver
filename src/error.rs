@@ -167,6 +167,10 @@ pub enum ErrorKind {
     #[error(display = "Command failed {}", _0)]
     CommandError(CommandError),
 
+    /// Wrapper around `cryto_mac::InvalidKeyLength`.
+    #[error(display = "{}", _0)]
+    CryptoMacInvalidKeyLength(#[error(source)] crypto_mac::InvalidKeyLength),
+
     // `trust_dns` does not implement the `Error` trait on their errors, so we have to manually
     // implement `From` rather than using the `source annotation.
     /// Wrapper around `trust_dns_resolver::error::ResolveError`.
@@ -211,6 +215,14 @@ pub enum ErrorKind {
         data_type: String,
         file_path: String,
     },
+
+    #[cfg(feature = "tokio-runtime")]
+    #[error(display = "{}", _0)]
+    ReqwestError(#[error(source)] reqwest::Error),
+
+    #[cfg(feature = "tokio-runtime")]
+    #[error(display = "{}", _0)]
+    ReqwestInvalidHeaderName(#[error(source)] reqwest::header::InvalidHeaderName),
 
     /// The server returned an invalid reply to a database operation.
     #[error(

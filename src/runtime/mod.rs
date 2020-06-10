@@ -1,5 +1,7 @@
 mod async_read_ext;
 mod async_write_ext;
+#[allow(dead_code)]
+mod http;
 mod join_handle;
 mod resolver;
 mod stream;
@@ -17,6 +19,7 @@ use crate::{
     error::{ErrorKind, Result},
     options::StreamAddress,
 };
+pub(crate) use http::HttpClient;
 
 /// An abstract handle to the async runtime.
 #[derive(Clone, Copy, Debug)]
