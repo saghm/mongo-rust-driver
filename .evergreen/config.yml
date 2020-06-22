@@ -87,6 +87,192 @@ functions:
       params:
         file: src/expansion.yml
 
+  "add aws auth variables to file":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        silent: true
+        script: |
+          cat <<EOF > ${DRIVERS_TOOLS}/.evergreen/auth_aws/aws_e2e_setup.json
+          {
+              "iam_auth_ecs_account" : "${iam_auth_ecs_account}",
+              "iam_auth_ecs_secret_access_key" : "${iam_auth_ecs_secret_access_key}",
+              "iam_auth_ecs_account_arn": "arn:aws:iam::557821124784:user/authtest_fargate_user",
+              "iam_auth_ecs_cluster": "${iam_auth_ecs_cluster}",
+              "iam_auth_ecs_task_definition": "${iam_auth_ecs_task_definition}",
+              "iam_auth_ecs_subnet_a": "${iam_auth_ecs_subnet_a}",
+              "iam_auth_ecs_subnet_b": "${iam_auth_ecs_subnet_b}",
+              "iam_auth_ecs_security_group": "${iam_auth_ecs_security_group}",
+              "iam_auth_assume_aws_account" : "${iam_auth_assume_aws_account}",
+              "iam_auth_assume_aws_secret_access_key" : "${iam_auth_assume_aws_secret_access_key}",
+              "iam_auth_assume_role_name" : "${iam_auth_assume_role_name}",
+              "iam_auth_ec2_instance_account" : "${iam_auth_ec2_instance_account}",
+              "iam_auth_ec2_instance_secret_access_key" : "${iam_auth_ec2_instance_secret_access_key}",
+              "iam_auth_ec2_instance_profile" : "${iam_auth_ec2_instance_profile}"
+          }
+          EOF
+
+  "run aws auth test with regular aws credentials":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          # The aws_e2e_assume_role script requires python3 with boto3.
+          virtualenv mongovenv
+          if [ "Windows_NT" = "$OS" ]; then
+            . mongovenv/Scripts/activate
+          else
+            . mongovenv/bin/activate
+          fi
+          pip install boto3
+          cd ${DRIVERS_TOOLS}/.evergreen/auth_aws
+          mongo aws_e2e_regular_aws.js
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        silent: true
+        script: |
+          cat <<'EOF' > "${PROJECT_DIRECTORY}/prepare_mongodb_aws.sh"
+            alias urlencode='python -c "import sys, urllib as ul; sys.stdout.write(ul.quote_plus(sys.argv[1]))"'
+            USER=$(urlencode ${iam_auth_ecs_account})
+            PASS=$(urlencode ${iam_auth_ecs_secret_access_key})
+            MONGODB_URI="mongodb://$USER:$PASS@localhost"
+          EOF
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          ASYNC_RUNTIME=${ASYNC_RUNTIME} .evergreen/run-aws-tests.sh
+
+  "run aws auth test with assume role credentials":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          cd ${DRIVERS_TOOLS}/.evergreen/auth_aws
+          mongo aws_e2e_assume_role.js
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        silent: true
+        script: |
+          # DO NOT ECHO WITH XTRACE (which PREPARE_SHELL does)
+          cat <<'EOF' > "${PROJECT_DIRECTORY}/prepare_mongodb_aws.sh"
+              alias urlencode='python -c "import sys, urllib as ul; sys.stdout.write(ul.quote_plus(sys.argv[1]))"'
+              alias jsonkey='python -c "import json,sys;sys.stdout.write(json.load(sys.stdin)[sys.argv[1]])" < ${DRIVERS_TOOLS}/.evergreen/auth_aws/creds.json'
+              USER=$(jsonkey AccessKeyId)
+              USER=$(urlencode $USER)
+              PASS=$(jsonkey SecretAccessKey)
+              PASS=$(urlencode $PASS)
+              SESSION_TOKEN=$(jsonkey SessionToken)
+              SESSION_TOKEN=$(urlencode $SESSION_TOKEN)
+              MONGODB_URI="mongodb://$USER:$PASS@localhost"
+          EOF
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          ASYNC_RUNTIME=${ASYNC_RUNTIME} .evergreen/run-aws-tests.sh
+
+  "run aws auth test with aws EC2 credentials":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          if [ "${skip_EC2_auth_test}" == "true" ]; then
+             echo "This platform does not support the EC2 auth test, skipping..."
+             exit 0
+          fi
+          # The mongovenv was created earlier in "run aws auth test with assume role credentials".
+          if [ "Windows_NT" = "$OS" ]; then
+            . mongovenv/Scripts/activate
+          else
+            . mongovenv/bin/activate
+          fi
+          cd ${DRIVERS_TOOLS}/.evergreen/auth_aws
+          mongo aws_e2e_ec2.js
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          ASYNC_RUNTIME=${ASYNC_RUNTIME} .evergreen/run-aws-tests.sh
+
+  "run aws auth test with aws credentials as environment variables":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        silent: true
+        script: |
+          # DO NOT ECHO WITH XTRACE (which PREPARE_SHELL does)
+          cat <<'EOF' > "${PROJECT_DIRECTORY}/prepare_mongodb_aws.sh"
+            export AWS_ACCESS_KEY_ID=${iam_auth_ecs_account}
+            export AWS_SECRET_ACCESS_KEY=${iam_auth_ecs_secret_access_key}
+          EOF
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          ASYNC_RUNTIME=${ASYNC_RUNTIME} PROJECT_DIRECTORY=${PROJECT_DIRECTORY} .evergreen/run-aws-tests.sh
+
+  "run aws auth test with aws credentials and session token as environment variables":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        silent: true
+        script: |
+          # DO NOT ECHO WITH XTRACE (which PREPARE_SHELL does)
+          cat <<'EOF' > "${PROJECT_DIRECTORY}/prepare_mongodb_aws.sh"
+            alias jsonkey='python -c "import json,sys;sys.stdout.write(json.load(sys.stdin)[sys.argv[1]])" < ${DRIVERS_TOOLS}/.evergreen/auth_aws/creds.json'
+            export AWS_ACCESS_KEY_ID=$(jsonkey AccessKeyId)
+            export AWS_SECRET_ACCESS_KEY=$(jsonkey SecretAccessKey) 
+            export AWS_SESSION_TOKEN=$(jsonkey SessionToken)
+          EOF
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          ASYNC_RUNTIME=${ASYNC_RUNTIME} .evergreen/run-aws-tests.sh
+
+  "run aws ECS auth test":
+    - command: shell.exec
+      type: test
+      params:
+        working_dir: "src"
+        script: |
+          ${PREPARE_SHELL}
+          if [ "${skip_ECS_auth_test}" == "true" ]; then
+             echo "This platform does not support the ECS auth test, skipping..."
+             exit 0
+          fi
+          cd ${DRIVERS_TOOLS}/.evergreen/auth_aws
+          cat <<EOF > setup.js
+          const mongo_binaries = "$MONGODB_BINARIES";
+          const project_dir = "$PROJECT_DIRECTORY";
+          EOF
+          mongo --nodb setup.js aws_e2e_ecs.js
+          cd -
+
   "prepare resources":
     - command: shell.exec
       params:
@@ -109,7 +295,12 @@ functions:
       params:
         script: |
           ${PREPARE_SHELL}
-          MONGODB_VERSION=${MONGODB_VERSION} TOPOLOGY=${TOPOLOGY} AUTH=${AUTH} SSL=${SSL} sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
+          ORCHESTRATION_FILE=${ORCHESTRATION_FILE} \
+            MONGODB_VERSION=${MONGODB_VERSION} \
+            TOPOLOGY=${TOPOLOGY} \
+            AUTH=${AUTH} \
+            SSL=${SSL} \
+            sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
     # run-orchestration generates expansion file with the MONGODB_URI for the cluster
     - command: expansions.update
       params:
@@ -310,6 +501,51 @@ tasks:
           TOPOLOGY: "sharded_cluster"
       - func: "run tests"
 
+  - name: "test-4.4-standalone"
+    tags: ["4.4", "standalone"]
+    commands:
+      - func: "bootstrap mongo-orchestration"
+        vars:
+          MONGODB_VERSION: "4.4"
+          TOPOLOGY: "server"
+      - func: "run tests"
+
+  - name: "test-4.4-replica_set"
+    tags: ["4.4", "replica_set"]
+    commands:
+      - func: "bootstrap mongo-orchestration"
+        vars:
+          MONGODB_VERSION: "4.4"
+          TOPOLOGY: "replica_set"
+      - func: "run tests"
+
+  - name: "test-4.4-sharded_cluster"
+    tags: ["4.4", "sharded_cluster"]
+    commands:
+      - func: "bootstrap mongo-orchestration"
+        vars:
+          MONGODB_VERSION: "4.4"
+          TOPOLOGY: "sharded_cluster"
+      - func: "run tests"
+
+  - name: "test-4.4-aws-auth"
+    # "4.4" explicitly left off to keep this out of the generic matrix
+    tags: ["aws-auth"]
+    commands:
+      - func: "bootstrap mongo-orchestration"
+        vars:
+          ORCHESTRATION_FILE: "auth-aws.json"
+          MONGODB_VERSION: "4.4"
+          AUTH: "auth"
+          TOPOLOGY: "server"
+      - func: "add aws auth variables to file"
+      - func: "run aws auth test with regular aws credentials"
+      - func: "run aws auth test with assume role credentials"
+      - func: "run aws auth test with aws credentials as environment variables"
+      - func: "run aws auth test with aws credentials and session token as environment variables"
+      - func: "run aws auth test with aws EC2 credentials"
+      - func: "run aws ECS auth test"
+
   - name: "test-latest-standalone"
     tags: ["latest", "standalone"]
     commands:
@@ -337,10 +573,28 @@ tasks:
           TOPOLOGY: "sharded_cluster"
       - func: "run tests"
 
+  - name: "test-latest-aws-auth"
+    # "latest" explicitly left off to keep this out of the generic matrix
+    tags: ["aws-auth"]
+    commands:
+      - func: "bootstrap mongo-orchestration"
+        vars:
+          ORCHESTRATION_FILE: "auth-aws.json"
+          MONGODB_VERSION: "latest"
+          AUTH: "auth"
+          TOPOLOGY: "server"
+      - func: "add aws auth variables to file"
+      - func: "run aws auth test with regular aws credentials"
+      - func: "run aws auth test with assume role credentials"
+      - func: "run aws auth test with aws credentials as environment variables"
+      - func: "run aws auth test with aws credentials and session token as environment variables"
+      - func: "run aws auth test with aws EC2 credentials"
+      - func: "run aws ECS auth test"
+          
   - name: "test-atlas-connectivity"
     tags: ["atlas-connect"]
     commands:
-      - func: "run atlas tests"
+      - func: "run atlas tests"         
 
   - name: "check-rustfmt"
     commands:
@@ -441,6 +695,7 @@ buildvariants:
   display_name: "${os} ${auth-and-tls} with ${async-runtime}"
   tasks:
      - ".latest"
+     - ".4.4"
      - ".4.2"
      - ".4.0"
      - ".3.6"
@@ -451,6 +706,13 @@ buildvariants:
   display_name: "Atlas Connectivity ${os} with ${async-runtime}"
   tasks:
     - ".atlas-connect"
+- matrix_name: "aws-auth"
+  matrix_spec:
+    os: "*"
+    async-runtime: "tokio"
+  display_name: "AWS Auth ${os} with ${async-runtime}"
+  tasks:
+    - ".aws-auth"
 
 -
   name: "lint"

@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod test;
-
 use chrono::{offset::Utc, DateTime};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
@@ -24,7 +21,7 @@ pub(super) async fn authenticate_stream(
     credential: &Credential,
     http_client: &HttpClient,
 ) -> Result<()> {
-    let source = match credential.source.as_ref().map(|s| s.as_str()) {
+    let source = match credential.source.as_deref() {
         Some("$external") | None => "$external",
         Some(..) => {
             return Err(Error::authentication_error(
@@ -43,24 +40,24 @@ pub(super) async fn authenticate_stream(
         "p": 110i32,
     };
     let mut client_first_payload_bytes = Vec::new();
-    client_first_payload.to_writer(&mut client_first_payload_bytes)?;
+    client_first_payload
+        .to_writer(&mut client_first_payload_bytes)
+        .unwrap();
 
     let sasl_start = SaslStart::new(AuthMechanism::MongoDbAws, client_first_payload_bytes);
     let client_first = Command::new("saslStart".into(), source.into(), sasl_start.into_command());
 
-    let server_first_response = conn.send_command(client_first, None).await?;
+    let server_first_response = conn.send_command(client_first, None).await.unwrap();
 
-    let server_first = ServerFirst::parse(server_first_response.raw_response)?;
-    server_first.validate(&nonce)?;
+    let server_first = ServerFirst::parse(server_first_response.raw_response).unwrap();
+    server_first.validate(&nonce).unwrap();
 
-    let aws_credential = AwsCredential::get(credential, http_client).await?;
+    let aws_credential = AwsCredential::get(credential, http_client).await.unwrap();
     let date = Utc::now();
 
-    let authorization_header = aws_credential.compute_authorization_header(
-        date,
-        &server_first.sts_host,
-        &server_first.server_nonce,
-    )?;
+    let authorization_header = aws_credential
+        .compute_authorization_header(date, &server_first.sts_host, &server_first.server_nonce)
+        .unwrap();
 
     let mut client_second_payload = doc! {
         "a": authorization_header,
@@ -72,7 +69,9 @@ pub(super) async fn authenticate_stream(
     }
 
     let mut client_second_payload_bytes = Vec::new();
-    client_second_payload.to_writer(&mut client_second_payload_bytes)?;
+    client_second_payload
+        .to_writer(&mut client_second_payload_bytes)
+        .unwrap();
 
     let sasl_continue = SaslContinue::new(
         server_first.conversation_id.clone(),
@@ -85,8 +84,9 @@ pub(super) async fn authenticate_stream(
         sasl_continue.into_command(),
     );
 
-    let server_second_response = conn.send_command(client_second, None).await?;
-    let server_second = SaslResponse::parse("MONGODB-AWS", server_second_response.raw_response)?;
+    let server_second_response = conn.send_command(client_second, None).await.unwrap();
+    let server_second =
+        SaslResponse::parse("MONGODB-AWS", server_second_response.raw_response).unwrap();
 
     if server_second.conversation_id != server_first.conversation_id {
         return Err(Error::invalid_authentication_response("MONGODB-AWS"));
@@ -263,13 +263,15 @@ impl AwsCredential {
         let hashed_request = hex::encode(Sha256::digest(request.as_bytes()));
         let canonical_request = format!("{}\n{}", request, hashed_request);
 
+        dbg!(&canonical_request);
+
         let small_date = date.format("%Y%m%d").to_string();
 
         let region = if host == "sts.amazon.com" {
             "us-east-1"
         } else {
             let parts: Vec<_> = host.split('.').collect();
-            parts.get(1).map(|s| *s).unwrap_or("us-east-1")
+            parts.get(1).copied().unwrap_or("us-east-1")
         };
 
         #[rustfmt::skip]

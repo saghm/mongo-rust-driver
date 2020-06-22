@@ -12,8 +12,8 @@ pub(crate) struct HttpClient {
     inner: reqwest::Client,
 }
 
+#[cfg(feature = "tokio-runtime")]
 impl HttpClient {
-    #[cfg(feature = "tokio-runtime")]
     pub(crate) async fn get_and_deserialize_json<'a, T>(
         &self,
         uri: &str,
@@ -31,7 +31,6 @@ impl HttpClient {
         Ok(value)
     }
 
-    #[cfg(feature = "tokio-runtime")]
     pub(crate) async fn get_and_read_string<'a>(
         &self,
         uri: &str,
@@ -41,7 +40,6 @@ impl HttpClient {
             .await
     }
 
-    #[cfg(feature = "tokio-runtime")]
     pub(crate) async fn put_and_read_string<'a>(
         &self,
         uri: &str,
@@ -62,7 +60,6 @@ impl HttpClient {
         Ok(text)
     }
 
-    #[cfg(feature = "tokio-runtime")]
     pub(crate) async fn request<'a>(
         &self,
         method: Method,

@@ -75,14 +75,14 @@ impl Topology {
             options: ClientOptions::new_srv(),
         };
 
-        let http_client = Default::default();
+        let http_client = HttpClient::default();
 
         let servers = hosts
             .into_iter()
             .map(|address| {
                 (
                     address.clone(),
-                    Server::new(address, &Default::default(), http_client.clone()).into(),
+                    Server::new(address, &ClientOptions::default(), http_client.clone()).into(),
                 )
             })
             .collect();

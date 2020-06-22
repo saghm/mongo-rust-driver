@@ -400,7 +400,7 @@ impl ServerFirst {
         };
 
         Ok(ServerFirst {
-            conversation_id: conversation_id.clone(),
+            conversation_id,
             done,
             message: message.to_string(),
             nonce: full_nonce,
@@ -552,7 +552,7 @@ impl ServerFinal {
         };
 
         Ok(ServerFinal {
-            conversation_id: conversation_id.clone(),
+            conversation_id,
             done,
             body,
         })

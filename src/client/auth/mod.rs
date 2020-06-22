@@ -27,7 +27,6 @@ const SCRAM_SHA_1_STR: &str = "SCRAM-SHA-1";
 const SCRAM_SHA_256_STR: &str = "SCRAM-SHA-256";
 const MONGODB_CR_STR: &str = "MONGODB-CR";
 const GSSAPI_STR: &str = "GSSAPI";
-#[cfg(feature = "tokio-runtime")]
 const MONGODB_AWS_STR: &str = "MONGODB-AWS";
 const MONGODB_X509_STR: &str = "MONGODB-X509";
 const PLAIN_STR: &str = "PLAIN";
@@ -192,6 +191,15 @@ impl FromStr for AuthMechanism {
             MONGODB_X509_STR => Ok(AuthMechanism::MongoDbX509),
             GSSAPI_STR => Ok(AuthMechanism::Gssapi),
             PLAIN_STR => Ok(AuthMechanism::Plain),
+
+            #[cfg(feature = "tokio-runtime")]
+            MONGODB_AWS_STR => Ok(AuthMechanism::MongoDbAws),
+            #[cfg(not(feature = "tokio-runtime"))]
+            MONGODB_AWS_STR => Err(ErrorKind::ArgumentError {
+                message: "MONGODB-AWS auth is only supported with the tokio runtime".into(),
+            }
+            .into()),
+
             _ => Err(ErrorKind::ArgumentError {
                 message: format!("invalid mechanism string: {}", str),
             }
