@@ -235,39 +235,34 @@ impl AwsCredential {
             token_signed_header = token_signed_header,
         );
 
-        let body = "Action=GetCallerIdentity&Version=2011-06-15";
-        let hashed_body = hex::encode(Sha256::digest(body.as_bytes()));
-
         let nonce = base64::encode(server_nonce);
 
         #[rustfmt::skip]
 		let request = format!(
 		    "\
              POST\n\
-             /\n\
- 	         {body}\n\
+			 /\n\
+             Action=GetCallerIdentity&Version=2011-06-15\n\
              content-type:application/x-www-form-urlencoded\n\
              content-length:43\n\
              host:{host}\n\
              x-amz-date:{date}\n\
 			 {token}\
 			 x-mongodb-server-nonce:{nonce}\n\
-			 x-mongodb-gs2-cb-flag:n\n\n\
+			 x-mongodb-gs2-cb-flag:n\n\
+			 \n\
              {signed_headers}\n\
 			 {hashed_body}\
              ",
-			body = body,
 			host = host,
 			date = date_str,
 			token = token,
 			nonce = nonce,
 			signed_headers = signed_headers,
-			hashed_body = hashed_body,
+			hashed_body = hex::encode(Sha256::digest(None)),
 		);
 
-        println!("--------------------------------\n{}", request);
-
-        let hashed_request = hex::encode(Sha256::digest(request.as_bytes()));
+        let hashed_request = hex::encode(Sha256::digest(&request));
 
         let small_date = date.format("%Y%m%d").to_string();
 
