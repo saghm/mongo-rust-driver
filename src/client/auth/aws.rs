@@ -235,14 +235,16 @@ impl AwsCredential {
             token_signed_header = token_signed_header,
         );
 
+        let body = "Action=GetCallerIdentity&Version=2011-06-15";
+        let hashed_body = hex::encode(Sha256::digest(body.as_bytes()));
+
         let nonce = base64::encode(server_nonce);
 
         #[rustfmt::skip]
 		let request = format!(
 		    "\
              POST\n\
-			 /\n\
-             Action=GetCallerIdentity&Version=2011-06-15\n\
+			 /\n\n\
              content-type:application/x-www-form-urlencoded\n\
              content-length:43\n\
              host:{host}\n\
@@ -258,7 +260,7 @@ impl AwsCredential {
 			token = token,
 			nonce = nonce,
 			signed_headers = signed_headers,
-			hashed_body = hex::encode(Sha256::digest(&[])),
+			hashed_body = hashed_body,
 		);
 
         dbg!(&request);
@@ -279,7 +281,7 @@ impl AwsCredential {
 			"\
              AWS4-HMAC-SHA256\n\
              {full_date}\n\
-			 {small_date}/{region}/iam/aws4_request\n\
+			 {small_date}/{region}/sts/aws4_request\n\
 			 {hashed_request}\
             ",
 			full_date = date_str,
@@ -293,7 +295,7 @@ impl AwsCredential {
         let first_hmac_key = format!("AWS4{}", self.secret_key);
         let k_date = hmac(first_hmac_key, &small_date)?;
         let k_region = hmac(k_date, region)?;
-        let k_service = hmac(k_region, "iam")?;
+        let k_service = hmac(k_region, "sts")?;
         let k_signing = hmac(k_service, "aws4_request")?;
 
         let signature_bytes = hmac(k_signing, string_to_sign)?;
@@ -303,7 +305,7 @@ impl AwsCredential {
 		let auth_header = format!(
 	        "\
              Authorization: AWS-4-HMAC-SHA-256 \
-             Credential={access_key}/{small_date}/{region}/iam/aws4_request, \
+             Credential={access_key}/{small_date}/{region}/sts/aws4_request, \
              SignedHeaders={signed_headers}, \
              Signature={signature}\
             ",
