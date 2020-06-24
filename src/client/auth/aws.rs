@@ -252,7 +252,7 @@ impl AwsCredential {
 			 x-mongodb-server-nonce:{nonce}\n\
 			 \n\
              {signed_headers}\n\
-			 {hashed_body}\
+             {hashed_body}\
              ",
 			host = host,
 			date = date_str,
