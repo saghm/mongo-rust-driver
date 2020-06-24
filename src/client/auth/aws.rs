@@ -266,6 +266,8 @@ impl AwsCredential {
 			hashed_body = hashed_body,
 		);
 
+        println!("--------------------------------\n{}", request);
+
         let hashed_request = hex::encode(Sha256::digest(request.as_bytes()));
 
         let small_date = date.format("%Y%m%d").to_string();
