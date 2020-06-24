@@ -259,10 +259,10 @@ impl AwsCredential {
 			token = token,
 			nonce = nonce,
 			signed_headers = signed_headers,
-			hashed_body = hex::encode(Sha256::digest(None)),
+			hashed_body = hex::encode(Sha256::digest(&[])),
 		);
 
-        let hashed_request = hex::encode(Sha256::digest(&request));
+        let hashed_request = hex::encode(Sha256::digest(request.as_bytes()));
 
         let small_date = date.format("%Y%m%d").to_string();
 

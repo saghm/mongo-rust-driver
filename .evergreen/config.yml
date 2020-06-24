@@ -295,11 +295,11 @@ functions:
       params:
         script: |
           ${PREPARE_SHELL}
-          ORCHESTRATION_FILE=${ORCHESTRATION_FILE}
-            MONGODB_VERSION=${MONGODB_VERSION}
-            TOPOLOGY=${TOPOLOGY}
-            AUTH=${AUTH}
-            SSL=${SSL}
+          ORCHESTRATION_FILE=${ORCHESTRATION_FILE} \
+            MONGODB_VERSION=${MONGODB_VERSION} \
+            TOPOLOGY=${TOPOLOGY} \
+            AUTH=${AUTH} \
+            SSL=${SSL} \
             sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
     # run-orchestration generates expansion file with the MONGODB_URI for the cluster
     - command: expansions.update
