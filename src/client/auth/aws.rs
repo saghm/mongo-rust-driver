@@ -225,8 +225,9 @@ impl AwsCredential {
         #[rustfmt::skip]
         let signed_headers = format!(
             "\
+              content-length;\
               content-type;\
-              content-length;host;\
+              host;\
               x-amz-date;\
               {token_signed_header}\
               x-mongodb-gs2-cb-flag;\
@@ -245,8 +246,8 @@ impl AwsCredential {
 		    "\
              POST\n\
 			 /\n\n\
-             content-type:application/x-www-form-urlencoded\n\
              content-length:43\n\
+             content-type:application/x-www-form-urlencoded\n\
              host:{host}\n\
              x-amz-date:{date}\n\
 			 {token}\
