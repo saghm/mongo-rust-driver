@@ -314,6 +314,8 @@ impl AwsCredential {
 			signature = signature
 		);
 
+        dbg!(&auth_header);
+
         Ok(auth_header)
     }
 }
