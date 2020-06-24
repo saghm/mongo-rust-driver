@@ -267,7 +267,7 @@ impl AwsCredential {
 
         let small_date = date.format("%Y%m%d").to_string();
 
-        let region = if host == "sts.amazon.com" {
+        let region = if host == "sts.amazonaws.com" {
             "us-east-1"
         } else {
             let parts: Vec<_> = host.split('.').collect();
