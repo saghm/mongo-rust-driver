@@ -73,7 +73,7 @@ functions:
               export TMPDIR="$MONGO_ORCHESTRATION_HOME/db"
               export PATH="$MONGODB_BINARIES:$PATH"
               export PROJECT="${project}"
-              
+
               export AUTH=${AUTH}
               export SSL=${SSL}
               export TOPOLOGY=${TOPOLOGY}
@@ -243,7 +243,7 @@ functions:
           cat <<'EOF' > "${PROJECT_DIRECTORY}/prepare_mongodb_aws.sh"
             alias jsonkey='python -c "import json,sys;sys.stdout.write(json.load(sys.stdin)[sys.argv[1]])" < ${DRIVERS_TOOLS}/.evergreen/auth_aws/creds.json'
             export AWS_ACCESS_KEY_ID=$(jsonkey AccessKeyId)
-            export AWS_SECRET_ACCESS_KEY=$(jsonkey SecretAccessKey) 
+            export AWS_SECRET_ACCESS_KEY=$(jsonkey SecretAccessKey)
             export AWS_SESSION_TOKEN=$(jsonkey SessionToken)
           EOF
     - command: shell.exec
@@ -295,11 +295,11 @@ functions:
       params:
         script: |
           ${PREPARE_SHELL}
-          ORCHESTRATION_FILE=${ORCHESTRATION_FILE} \
-            MONGODB_VERSION=${MONGODB_VERSION} \
-            TOPOLOGY=${TOPOLOGY} \
-            AUTH=${AUTH} \
-            SSL=${SSL} \
+          ORCHESTRATION_FILE=${ORCHESTRATION_FILE}
+            MONGODB_VERSION=${MONGODB_VERSION}
+            TOPOLOGY=${TOPOLOGY}
+            AUTH=${AUTH}
+            SSL=${SSL}
             sh ${DRIVERS_TOOLS}/.evergreen/run-orchestration.sh
     # run-orchestration generates expansion file with the MONGODB_URI for the cluster
     - command: expansions.update
@@ -329,7 +329,7 @@ functions:
         working_dir: "src"
         script: |
           # DO NOT ECHO WITH XTRACE (which PREPARE_SHELL does)
-          export MONGO_ATLAS_TESTS=1 
+          export MONGO_ATLAS_TESTS=1
           export MONGO_ATLAS_FREE_TIER_REPL_URI='${MONGO_ATLAS_FREE_TIER_REPL_URI}'
           export MONGO_ATLAS_FREE_TIER_REPL_URI_SRV='${MONGO_ATLAS_FREE_TIER_REPL_URI_SRV}'
           ASYNC_RUNTIME=${ASYNC_RUNTIME} .evergreen/run-atlas-tests.sh
@@ -473,7 +473,7 @@ tasks:
           MONGODB_VERSION: "4.0"
           TOPOLOGY: "sharded_cluster"
       - func: "run tests"
-          
+
   - name: "test-4.2-standalone"
     tags: ["4.2", "standalone"]
     commands:
@@ -590,11 +590,11 @@ tasks:
       - func: "run aws auth test with aws credentials and session token as environment variables"
       - func: "run aws auth test with aws EC2 credentials"
       - func: "run aws ECS auth test"
-          
+
   - name: "test-atlas-connectivity"
     tags: ["atlas-connect"]
     commands:
-      - func: "run atlas tests"         
+      - func: "run atlas tests"
 
   - name: "check-rustfmt"
     commands:
