@@ -248,8 +248,8 @@ impl AwsCredential {
              host:{host}\n\
              x-amz-date:{date}\n\
 			 {token}\
-			 x-mongodb-server-nonce:{nonce}\n\
 			 x-mongodb-gs2-cb-flag:n\n\
+			 x-mongodb-server-nonce:{nonce}\n\
 			 \n\
              {signed_headers}\n\
 			 {hashed_body}\
@@ -288,6 +288,8 @@ impl AwsCredential {
 			region = region,
 			hashed_request = hashed_request,
 		);
+
+        dbg!(&string_to_sign);
 
         let first_hmac_key = format!("AWS4{}", self.secret_key);
         let k_date = hmac(first_hmac_key, &small_date)?;
