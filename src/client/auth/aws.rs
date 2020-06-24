@@ -252,8 +252,7 @@ impl AwsCredential {
              x-amz-date:{date}\n\
 			 {token}\
 			 x-mongodb-server-nonce:{nonce}\n\
-			 x-mongodb-gs2-cb-flag:n\n\
-			 \n\
+			 x-mongodb-gs2-cb-flag:n\n\n\
              {signed_headers}\n\
 			 {hashed_body}\
              ",
