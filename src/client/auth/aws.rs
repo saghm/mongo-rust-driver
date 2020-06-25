@@ -21,6 +21,8 @@ pub(super) async fn authenticate_stream(
     credential: &Credential,
     http_client: &HttpClient,
 ) -> Result<()> {
+    dbg!(credential);
+
     let source = match credential.source.as_deref() {
         Some("$external") | None => "$external",
         Some(..) => {
