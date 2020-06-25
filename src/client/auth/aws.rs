@@ -53,6 +53,9 @@ pub(super) async fn authenticate_stream(
     server_first.validate(&nonce).unwrap();
 
     let aws_credential = AwsCredential::get(credential, http_client).await.unwrap();
+
+    dbg!(&aws_credential);
+
     let date = Utc::now();
 
     let authorization_header = aws_credential
@@ -67,6 +70,8 @@ pub(super) async fn authenticate_stream(
     if let Some(security_token) = aws_credential.session_token {
         client_second_payload.insert("t", security_token);
     }
+
+    dbg!(&client_second_payload);
 
     let mut client_second_payload_bytes = Vec::new();
     client_second_payload
@@ -99,7 +104,7 @@ pub(super) async fn authenticate_stream(
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct AwsCredential {
     #[serde(rename = "AccessKeyId")]
     access_key: String,
@@ -290,8 +295,6 @@ impl AwsCredential {
 			region = region,
 			hashed_request = hashed_request,
 		);
-
-        dbg!(&string_to_sign);
 
         let first_hmac_key = format!("AWS4{}", self.secret_key);
         let k_date = hmac(first_hmac_key, &small_date)?;
