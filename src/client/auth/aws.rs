@@ -305,7 +305,7 @@ impl AwsCredential {
         #[rustfmt::skip]
 		let auth_header = format!(
 	        "\
-             Authorization: AWS4-HMAC-SHA-256 \
+             Authorization: AWS4-HMAC-SHA256 \
              Credential={access_key}/{small_date}/{region}/sts/aws4_request, \
              SignedHeaders={signed_headers}, \
              Signature={signature}\
