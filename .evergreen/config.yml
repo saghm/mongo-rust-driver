@@ -585,11 +585,11 @@ tasks:
           TOPOLOGY: "server"
       - func: "add aws auth variables to file"
       - func: "run aws auth test with regular aws credentials"
-      - func: "run aws auth test with assume role credentials"
-      - func: "run aws auth test with aws credentials as environment variables"
-      - func: "run aws auth test with aws credentials and session token as environment variables"
-      - func: "run aws auth test with aws EC2 credentials"
-      - func: "run aws ECS auth test"
+      # - func: "run aws auth test with assume role credentials"
+      # - func: "run aws auth test with aws credentials as environment variables"
+      # - func: "run aws auth test with aws credentials and session token as environment variables"
+      # - func: "run aws auth test with aws EC2 credentials"
+      # - func: "run aws ECS auth test"
 
   - name: "test-atlas-connectivity"
     tags: ["atlas-connect"]
