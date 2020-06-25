@@ -21,8 +21,6 @@ pub(super) async fn authenticate_stream(
     credential: &Credential,
     http_client: &HttpClient,
 ) -> Result<()> {
-    dbg!(credential);
-
     let source = match credential.source.as_deref() {
         Some("$external") | None => "$external",
         Some(..) => {
@@ -307,7 +305,7 @@ impl AwsCredential {
         #[rustfmt::skip]
 		let auth_header = format!(
 	        "\
-             Authorization: AWS-4-HMAC-SHA-256 \
+             Authorization: AWS4-HMAC-SHA-256 \
              Credential={access_key}/{small_date}/{region}/sts/aws4_request, \
              SignedHeaders={signed_headers}, \
              Signature={signature}\
